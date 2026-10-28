@@ -1,0 +1,7 @@
+.output
+.wxt
+node_modules
+public
+src/shared/
+test/fixtures/
+package-lock.json

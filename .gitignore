@@ -1,0 +1,20 @@
+node_modules
+.output
+.wxt
+web-ext.config.ts
+stats.html
+stats-*.json
+
+# Private extension key (only needed to sign a .crx)
+.keys/
+
+# Local overrides
+.env.local
+.env.*.local
+
+# Scrubbed WhatsApp Web snapshots waiting for review before they become fixtures
+snapshots/
+
+.DS_Store
+Thumbs.db
+*.log
