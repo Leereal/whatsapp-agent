@@ -40,6 +40,8 @@ export class ApiError extends Error {
   }
 }
 
+const GATEWAY_ERRORS = [502, 503, 504];
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = await installToken.getValue();
   if (!token) throw new ApiError("Add your extension token in the options page", "no_token");
@@ -56,6 +58,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     });
   } catch {
     throw new ApiError("Cannot reach CareerCVPro", "offline");
+  }
+  // The proxy answers for a backend that is down, e.g. while a deploy swaps containers
+  if (GATEWAY_ERRORS.includes(response.status)) {
+    throw new ApiError("Cannot reach CareerCVPro", "offline", response.status);
   }
 
   const body = (await response.json().catch(() => null)) as {
