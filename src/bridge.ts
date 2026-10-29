@@ -13,6 +13,18 @@ export class BridgeError extends Error {
 }
 
 /**
+ * Log a failed call, except when CareerCVPro or the background service was
+ * briefly out of reach: those calls retry on their own and the side panel
+ * shows the connection, so they don't belong on chrome://extensions' Errors.
+ */
+export function warnUnlessOffline(error: unknown): void {
+  if (error instanceof BridgeError && (error.kind === "offline" || error.kind === "unavailable")) {
+    return;
+  }
+  console.warn("[CareerCVPro WhatsApp]", error);
+}
+
+/**
  * Ask the service worker to call the CareerCVPro API (content scripts and
  * pages never call it directly). Throws BridgeError when the call failed.
  */

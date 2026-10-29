@@ -1,4 +1,4 @@
-import { callBackground } from "./bridge";
+import { callBackground, warnUnlessOffline } from "./bridge";
 import {
   clearComposer,
   composerText,
@@ -132,7 +132,7 @@ export class OpenChatWatcher {
       this.lastKey = key;
     } catch (error) {
       // Offline or not set up: the next check retries
-      console.warn("[CareerCVPro WhatsApp]", error);
+      warnUnlessOffline(error);
     } finally {
       this.running = false;
     }

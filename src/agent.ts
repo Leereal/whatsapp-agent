@@ -1,5 +1,5 @@
 import type { ContentScriptContext } from "wxt/utils/content-script-context";
-import { callBackground } from "./bridge";
+import { callBackground, warnUnlessOffline } from "./bridge";
 import { OpenChatWatcher } from "./copilot";
 import { UserActivity } from "./dom/userActivity";
 import { normalizePhone } from "./phone";
@@ -35,7 +35,7 @@ async function readyConfig() {
 }
 
 export function startAgent(ctx: ContentScriptContext, doc: Document): void {
-  const warn = (error: unknown) => console.warn("[CareerCVPro WhatsApp]", error);
+  const warn = warnUnlessOffline;
 
   const activity = new UserActivity(doc, (title) => {
     scheduler.removeChat(title);
