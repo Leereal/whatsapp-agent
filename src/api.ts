@@ -1,11 +1,25 @@
 import { API_BASE_URL } from "./config";
 import { installToken } from "./storage";
 import type {
+  ChatSyncRequest,
+  ChatSyncResponse,
+  ClaimResponse,
+  CurrentChat,
+  DraftOutcomeRequest,
+  DraftRequest,
+  DraftResponse,
+  EventListResponse,
   ExtensionConfig,
   HealthReportRequest,
   HealthReportResponse,
   HeartbeatRequest,
   HeartbeatResponse,
+  ManualReplyRequest,
+  OutboxItem,
+  OutboxResultRequest,
+  OutboxStatus,
+  ScanRequest,
+  ScanResponse,
 } from "./shared/contract";
 
 /**
@@ -75,4 +89,53 @@ export const api = {
 
   reportHealth: (body: HealthReportRequest) =>
     request<HealthReportResponse>("/health", { method: "POST", body: JSON.stringify(body) }),
+
+  scan: (body: ScanRequest) =>
+    request<ScanResponse>("/chats/scan", { method: "POST", body: JSON.stringify(body) }),
+
+  manualReply: (body: ManualReplyRequest) =>
+    request<unknown>("/chats/manual-reply", { method: "POST", body: JSON.stringify(body) }),
+
+  listOutbox: (statuses?: OutboxStatus[]) =>
+    request<OutboxItem[]>(statuses?.length ? `/outbox?status=${statuses.join(",")}` : "/outbox"),
+
+  claim: (id: string) =>
+    request<ClaimResponse>(`/outbox/${encodeURIComponent(id)}/claim`, { method: "POST" }),
+
+  result: (id: string, body: OutboxResultRequest) =>
+    request<OutboxItem>(`/outbox/${encodeURIComponent(id)}/result`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  approve: (id: string) =>
+    request<OutboxItem>(`/outbox/${encodeURIComponent(id)}/approve`, { method: "POST" }),
+
+  cancel: (id: string) =>
+    request<OutboxItem>(`/outbox/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  listEvents: () => request<EventListResponse>("/events?limit=30"),
+
+  syncChat: (body: ChatSyncRequest) =>
+    request<ChatSyncResponse>("/chats/sync", { method: "POST", body: JSON.stringify(body) }),
+
+  createDraft: (body: DraftRequest) =>
+    request<DraftResponse>("/drafts", { method: "POST", body: JSON.stringify(body) }),
+
+  draftOutcome: (id: string, body: DraftOutcomeRequest) =>
+    request<null>(`/drafts/${encodeURIComponent(id)}/outcome`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  applyDraftAction: (id: string, actionIndex: number) =>
+    request<CurrentChat>(`/drafts/${encodeURIComponent(id)}/apply`, {
+      method: "POST",
+      body: JSON.stringify({ action_index: actionIndex }),
+    }),
+
+  closeHandoff: (contactId: string) =>
+    request<CurrentChat>(`/contacts/${encodeURIComponent(contactId)}/close-handoff`, {
+      method: "POST",
+    }),
 };

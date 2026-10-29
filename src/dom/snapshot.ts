@@ -37,6 +37,8 @@ const UI_LABELS = new Set([
   "New chat",
   "Emoji",
   "Voice message",
+  // Sender label on my messages; theirs carry a name or number and stay masked
+  "You:",
 ]);
 
 const maskChar = (char: string) => (/\p{L}/u.test(char) ? "x" : /\p{N}/u.test(char) ? "0" : char);

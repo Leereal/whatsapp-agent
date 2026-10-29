@@ -1,4 +1,4 @@
-import type { ExtensionConfig, SelectorFailure } from "./shared/contract";
+import type { CurrentChat, ExtensionConfig, SelectorFailure } from "./shared/contract";
 
 /** What WhatsApp Web is showing */
 export type PageState = "loading" | "logged_out" | "ready";
@@ -9,6 +9,16 @@ export interface HealthState {
   /** A chat is open, so the conversation selectors were checked too */
   chatOpen: boolean;
   failures: SelectorFailure[];
+  checkedAt: string;
+}
+
+/** The chat open in WhatsApp Web */
+export interface OpenChatState {
+  title: string;
+  phone: string | null;
+  /** A client chat CareerCVPro knows; others are never sent anywhere */
+  known: boolean;
+  chat: CurrentChat | null;
   checkedAt: string;
 }
 

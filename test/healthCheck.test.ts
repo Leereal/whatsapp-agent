@@ -10,7 +10,7 @@ describe("selectors", () => {
   it("find the chat list, rows and titles", () => {
     const doc = loadFixture("synthetic-logged-in.html");
     expect(query("chatList", doc)?.getAttribute("aria-label")).toBe("Chat list");
-    expect(resolve("chatRow", doc).elements).toHaveLength(2);
+    expect(resolve("chatRow", doc).elements).toHaveLength(3);
     expect(query("chatRowTitle", doc)?.getAttribute("title")).toBe("Thandi M");
     expect(query("unreadBadge", doc)?.getAttribute("aria-label")).toBe("2 unread messages");
   });
@@ -53,6 +53,23 @@ describe("runHealthCheck", () => {
   it("passes on the chat list when no chat is open", () => {
     const health = runHealthCheck(loadFixture("synthetic-logged-in.html"), afterStartup);
     expect(health).toMatchObject({ pageState: "ready", chatOpen: false, failures: [] });
+  });
+
+  it("passes when the first row has no title but the others do (a row being redrawn)", () => {
+    const doc = loadFixture("synthetic-logged-in.html");
+    doc
+      .querySelector('[aria-label="Chat list"] [role="row"]')
+      ?.querySelectorAll("[title]")
+      .forEach((element) => element.removeAttribute("title"));
+    expect(failedKeys(doc)).toEqual([]);
+  });
+
+  it("fails when no row has a title", () => {
+    const doc = loadFixture("synthetic-logged-in.html");
+    doc
+      .querySelectorAll('[aria-label="Chat list"] [title]')
+      .forEach((element) => element.removeAttribute("title"));
+    expect(failedKeys(doc)).toEqual(["chatRowTitle"]);
   });
 
   it("also checks the open chat", () => {

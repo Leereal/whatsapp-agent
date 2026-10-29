@@ -4,11 +4,13 @@ import { HEALTH_CHECK_INTERVAL_MS, STARTUP_GRACE_MS } from "../src/config";
 import { runHealthCheck } from "../src/dom/healthCheck";
 import { takeSnapshot } from "../src/dom/snapshot";
 import type { ExtensionMessage, SnapshotReply } from "../src/messages";
+import { startAgent } from "../src/agent";
+import { insertDraft, readOpenChat } from "../src/copilot";
 
 /**
- * Runs inside WhatsApp Web. For now it only reads: it checks the page against
- * selectors.ts and reports the result to the service worker. It makes no
- * network requests of its own.
+ * Runs inside WhatsApp Web: checks the page against selectors.ts, and runs
+ * the assistant (src/agent.ts). It makes no network requests of its own;
+ * everything goes through the service worker.
  */
 export default defineContentScript({
   matches: ["https://web.whatsapp.com/*"],
@@ -28,10 +30,22 @@ export default defineContentScript({
     };
 
     ctx.setTimeout(check, 5_000);
+    startAgent(ctx, document);
     ctx.setInterval(check, HEALTH_CHECK_INTERVAL_MS);
 
     browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      if ((message as ExtensionMessage)?.type !== "take-snapshot") return false;
+      const request = message as ExtensionMessage;
+      if (request?.type === "read-open-chat") {
+        sendResponse(readOpenChat(document));
+        return false;
+      }
+      if (request?.type === "insert-draft") {
+        insertDraft(document, request).then(sendResponse, () =>
+          sendResponse({ ok: false, error: "Something went wrong in the WhatsApp tab." }),
+        );
+        return true; // respond asynchronously
+      }
+      if (request?.type !== "take-snapshot") return false;
 
       let reply: SnapshotReply;
       try {

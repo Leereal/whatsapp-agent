@@ -6,10 +6,13 @@ import { LANGUAGE_FAILURE_KEY } from "../../src/dom/healthCheck";
 import type { ExtensionMessage, SnapshotReply } from "../../src/messages";
 import { SELECTORS, type SelectorKey } from "../../src/selectors";
 import { connectionStatus, localKillSwitch, whatsappHealth } from "../../src/storage";
+import type { ExtensionConfig } from "../../src/shared/contract";
 import type { ConnectionStatus, HealthState } from "../../src/types";
 import { useStorageItem } from "../../src/ui/useStorageItem";
-
-const WHATSAPP_URL = "https://web.whatsapp.com/";
+import { Activity } from "./Activity";
+import { askWhatsAppTab, TAB_PROBLEMS, WHATSAPP_URL } from "../../src/ui/whatsappTab";
+import { Draft } from "./Draft";
+import { Outbox } from "./Outbox";
 
 type Tone = "good" | "warn" | "bad" | "neutral";
 
@@ -88,19 +91,31 @@ function whatsappRow(health: HealthState | null | undefined) {
   };
 }
 
-async function saveSnapshot(): Promise<string> {
-  const [tab] = await browser.tabs.query({ url: `${WHATSAPP_URL}*` });
-  if (!tab?.id) return "Open WhatsApp Web first.";
-
-  const message: ExtensionMessage = { type: "take-snapshot" };
-  let reply: SnapshotReply | undefined;
-  try {
-    reply = (await browser.tabs.sendMessage(tab.id, message)) as SnapshotReply | undefined;
-  } catch {
-    // The tab was opened before the extension loaded
-    reply = undefined;
+function pricingRow(config: ExtensionConfig) {
+  if (!config.pricing_ready) {
+    return {
+      tone: "warn" as Tone,
+      title: "No pricing message yet",
+      detail: "Add it in CareerCVPro → WhatsApp → Settings → Messages.",
+    };
   }
-  if (!reply) return "The WhatsApp tab did not answer. Reload it and try again.";
+  return config.auto_send_types.includes("pricing")
+    ? {
+        tone: "good" as Tone,
+        title: "Pricing: sent automatically",
+        detail: `To brand-new chats, ${config.delay_min_seconds}–${config.delay_max_seconds} s after their message`,
+      }
+    : {
+        tone: "neutral" as Tone,
+        title: "Pricing: waits for you",
+        detail: "New chats appear below; click Send to send the pricing",
+      };
+}
+
+async function saveSnapshot(): Promise<string> {
+  const result = await askWhatsAppTab<SnapshotReply>({ type: "take-snapshot" });
+  if (result.status !== "ok") return TAB_PROBLEMS[result.status];
+  const reply = result.reply;
   if ("error" in reply) return reply.error;
 
   const url = URL.createObjectURL(new Blob([reply.html], { type: "text/html" }));
@@ -140,7 +155,8 @@ export function App() {
     return () => clearInterval(timer);
   }, []);
 
-  const config = status?.state === "connected" ? status.config : status?.config;
+  const connected = status?.state === "connected";
+  const config = connected ? status.config : status?.config;
   const dashboardUrl = config?.dashboard_url ?? DEFAULT_DASHBOARD_URL;
   const [firstBlock] = automationBlocks({ status, health, localKillSwitch: localKill });
   const connection = connectionRow(status);
@@ -204,7 +220,12 @@ export function App() {
           title={firstBlock ? "Automation off" : "Automation ready"}
           detail={firstBlock ? BLOCK_MESSAGES[firstBlock] : undefined}
         />
+        {config?.enabled && <Row {...pricingRow(config)} />}
       </section>
+
+      <Draft enabled={connected} />
+      <Outbox enabled={Boolean(connected && config?.enabled)} />
+      <Activity enabled={Boolean(connected)} />
 
       <div className="flex gap-2">
         <button

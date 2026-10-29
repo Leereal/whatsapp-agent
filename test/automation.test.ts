@@ -15,6 +15,8 @@ const config: ExtensionConfig = {
   missed_chat_minutes: 30,
   min_extension_version: "0.1.0",
   dashboard_url: "https://careercvpro.com",
+  label_names: ["New customer"],
+  pricing_ready: true,
 };
 
 const connected: ConnectionStatus = {

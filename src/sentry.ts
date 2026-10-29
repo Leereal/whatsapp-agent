@@ -54,6 +54,26 @@ export function reportError(error: unknown, tags: Record<string, string> = {}): 
 }
 
 /**
+ * Report a send that stopped because WhatsApp Web didn't behave as expected
+ * (e.g. a chat wouldn't open), with the page structure around it so the
+ * selectors can be fixed. Grouped by reason.
+ */
+export function reportSendFailure(
+  reason: string,
+  details: Record<string, string | number | boolean>,
+  extensionVersion: string,
+): void {
+  if (!scope) return;
+  const forked = scope.clone();
+  forked.setTag("kind", "send_failure");
+  forked.setTag("reason", reason);
+  forked.setTag("extension_version", extensionVersion);
+  forked.setFingerprint(["send_failure", reason]);
+  forked.setExtras(details);
+  forked.captureMessage(`WhatsApp send stopped: ${reason}`, "warning" as SeverityLevel);
+}
+
+/**
  * Report a broken WhatsApp Web page. Tagged kind=selector_failure, which the
  * "WhatsApp selector failure" alert emails about; grouped by the failing keys.
  */

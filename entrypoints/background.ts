@@ -3,14 +3,20 @@ import { defineBackground } from "wxt/utils/define-background";
 import { api, ApiError } from "../src/api";
 import { HEALTH_RESEND_MS, HEALTH_STALE_MS } from "../src/config";
 import { healthKey } from "../src/dom/healthCheck";
-import type { ExtensionMessage } from "../src/messages";
-import { initSentry, reportError, reportSelectorFailure } from "../src/sentry";
+import type { ApiReply, ExtensionMessage } from "../src/messages";
+import {
+  initSentry,
+  reportError,
+  reportSelectorFailure,
+  reportSendFailure,
+} from "../src/sentry";
 import { INSTALL_TOKEN_PREFIX } from "../src/shared/contract";
 import {
   connectionStatus,
   installToken,
   lastHealthReport,
   lastSelectorAlert,
+  previousHealthKey,
   whatsappHealth,
 } from "../src/storage";
 import type { ConnectionStatus, HealthState } from "../src/types";
@@ -93,6 +99,13 @@ async function handleHealthReport(health: HealthState): Promise<void> {
   const key = healthKey(health);
   const failedKeys = health.failures.map((failure) => failure.key);
 
+  // Automation already stops on the first failed check (it reads the stored
+  // health). Reporting waits for the same failure on the next check, so a
+  // page caught mid-redraw doesn't raise an alert.
+  const previous = await previousHealthKey.getValue();
+  await previousHealthKey.setValue(key);
+  if (failedKeys.length > 0 && previous !== key) return;
+
   if (failedKeys.length > 0 && (await lastSelectorAlert.getValue()) !== key) {
     reportSelectorFailure(failedKeys, extensionVersion());
   }
@@ -132,6 +145,20 @@ async function clearToken(): Promise<ConnectionStatus> {
   return refreshConnection();
 }
 
+/** Run an API call for a content script or page, as an ApiReply */
+async function proxy<T>(call: () => Promise<T>): Promise<ApiReply<T>> {
+  try {
+    return { ok: true, data: await call() };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      if (error.kind === "server" && error.status >= 500) reportError(error, { area: "api" });
+      return { ok: false, error: error.message, kind: error.kind };
+    }
+    reportError(error, { area: "api" });
+    return { ok: false, error: "Something went wrong", kind: "server" };
+  }
+}
+
 function handleMessage(message: ExtensionMessage): Promise<unknown> | null {
   switch (message?.type) {
     case "health-report":
@@ -142,6 +169,39 @@ function handleMessage(message: ExtensionMessage): Promise<unknown> | null {
       return saveToken(message.token);
     case "clear-token":
       return clearToken();
+    case "report-send-failure":
+      reportSendFailure(message.reason, message.details, extensionVersion());
+      return Promise.resolve({ ok: true, data: null });
+    case "scan":
+      return proxy(() => api.scan({ chats: message.chats }));
+    case "outbox-list":
+      return proxy(() => api.listOutbox(message.statuses));
+    case "outbox-claim":
+      return proxy(() => api.claim(message.id));
+    case "outbox-result":
+      return proxy(() => api.result(message.id, message.result));
+    case "outbox-approve":
+      return proxy(() => api.approve(message.id));
+    case "outbox-cancel":
+      return proxy(() => api.cancel(message.id));
+    case "manual-reply":
+      return proxy(() => api.manualReply({ title: message.title, phone: message.phone }));
+    case "events-list":
+      return proxy(() => api.listEvents());
+    case "chat-sync":
+      return proxy(() =>
+        api.syncChat({ title: message.title, phone: message.phone, messages: message.messages }),
+      );
+    case "draft-create":
+      return proxy(() =>
+        api.createDraft({ title: message.title, phone: message.phone, messages: message.messages }),
+      );
+    case "draft-outcome":
+      return proxy(() => api.draftOutcome(message.id, message.outcome));
+    case "draft-apply":
+      return proxy(() => api.applyDraftAction(message.id, message.actionIndex));
+    case "handoff-close":
+      return proxy(() => api.closeHandoff(message.contactId));
     default:
       return null;
   }

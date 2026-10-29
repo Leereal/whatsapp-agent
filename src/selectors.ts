@@ -18,9 +18,17 @@ export type SelectorKey =
   | "unreadBadge"
   | "searchBox"
   | "conversationPanel"
+  | "conversationHeader"
   | "conversationTitle"
   | "messageRow"
   | "messageMeta"
+  | "messageText"
+  | "messageImage"
+  | "messageSender"
+  | "messageStatus"
+  | "messageTailOut"
+  | "messageTailIn"
+  | "systemMessage"
   | "composer"
   | "sendButton";
 
@@ -68,7 +76,9 @@ export const SELECTORS: Readonly<Record<SelectorKey, SelectorDef>> = {
     description: "Contact name or number in a chat row",
     candidates: ['span[title][dir="auto"]', "span[title]", "[title]"],
     scope: "app",
-    within: "chatRow",
+    // Checked across the list, not just the first row: a row at the top
+    // (e.g. one being redrawn) can briefly have no title
+    within: "chatList",
   },
   unreadBadge: {
     description: "Unread-count badge on a chat row",
@@ -92,6 +102,12 @@ export const SELECTORS: Readonly<Record<SelectorKey, SelectorDef>> = {
     candidates: ["#main", '[data-testid="conversation-panel-wrapper"]'],
     scope: "chat",
   },
+  conversationHeader: {
+    description: "Header of the open chat (name, photo, call buttons)",
+    candidates: ["header", '[data-testid="conversation-header"]'],
+    scope: "chat",
+    within: "conversationPanel",
+  },
   conversationTitle: {
     description: "Contact name or number in the open chat's header",
     candidates: ["header span[title]", 'header [dir="auto"][title]', 'header span[dir="auto"]'],
@@ -99,7 +115,7 @@ export const SELECTORS: Readonly<Record<SelectorKey, SelectorDef>> = {
     within: "conversationPanel",
   },
   messageRow: {
-    description: "A message in the open chat (data-id holds the chat and message ids)",
+    description: "A message in the open chat (data-id holds its message id)",
     candidates: ['[role="row"] [data-id]', 'div[data-id*="@"]', "[data-id]"],
     scope: "chat",
     within: "conversationPanel",
@@ -110,6 +126,74 @@ export const SELECTORS: Readonly<Record<SelectorKey, SelectorDef>> = {
     scope: "chat",
     within: "conversationPanel",
     // A chat can contain only media
+    optional: true,
+  },
+  messageText: {
+    description: "The text of a message (emoji inside are images with data-plain-text)",
+    candidates: [
+      '[data-pre-plain-text] [data-testid="selectable-text"]',
+      '[data-testid="selectable-text"]',
+      "[data-pre-plain-text] span[dir]",
+    ],
+    scope: "chat",
+    within: "conversationPanel",
+    // Media without a caption has none
+    optional: true,
+  },
+  messageImage: {
+    description: "A photo in a message (shown from a blob: URL)",
+    candidates: ['img[src^="blob:"]'],
+    scope: "chat",
+    within: "conversationPanel",
+    optional: true,
+  },
+  // Who sent a message. Read per message (queryInside); any one may be missing
+  // on a given message, so none of these is required by the health check.
+  messageSender: {
+    description: 'Hidden label before a message naming its sender ("You:" for mine)',
+    candidates: ['span[aria-label$=":"]'],
+    scope: "chat",
+    within: "conversationPanel",
+    optional: true,
+  },
+  messageStatus: {
+    description: "Delivery ticks, only on messages I sent",
+    candidates: [
+      '[aria-label=" Read "]',
+      '[aria-label=" Delivered "]',
+      '[aria-label=" Sent "]',
+      '[aria-label=" Pending "]',
+      '[aria-label="Read"]',
+      '[aria-label="Delivered"]',
+      '[aria-label="Sent"]',
+      '[aria-label="Pending"]',
+    ],
+    scope: "chat",
+    within: "conversationPanel",
+    optional: true,
+  },
+  messageTailOut: {
+    description: "Tail on the first bubble of a run of my messages",
+    candidates: ['[data-icon="tail-out"]', '[data-testid="tail-out"]'],
+    scope: "chat",
+    within: "conversationPanel",
+    optional: true,
+  },
+  messageTailIn: {
+    description: "Tail on the first bubble of a run of their messages",
+    candidates: ['[data-icon="tail-in"]', '[data-testid="tail-in"]'],
+    scope: "chat",
+    within: "conversationPanel",
+    optional: true,
+  },
+  systemMessage: {
+    description: 'WhatsApp notice in a chat (encryption, "not a contact" card), not a message',
+    candidates: [
+      '[data-testid="msg-notification-container"]',
+      '[data-testid="system_message"]',
+    ],
+    scope: "chat",
+    within: "conversationPanel",
     optional: true,
   },
   composer: {
@@ -176,6 +260,31 @@ export function queryAll<T extends Element = Element>(
   root: ParentNode = document,
 ): T[] {
   return resolve<T>(key, root).elements;
+}
+
+/**
+ * First match inside a specific element (e.g. one chat row), ignoring the
+ * selector's usual `within` scope
+ */
+export function queryInside<T extends Element = Element>(
+  key: SelectorKey,
+  element: ParentNode,
+): T | null {
+  for (const candidate of SELECTORS[key].candidates) {
+    const match = element.querySelector(candidate) as T | null;
+    if (match) return match;
+  }
+  return null;
+}
+
+/** The element itself or its nearest ancestor matching the selector */
+export function closest(key: SelectorKey, element: Element | null): Element | null {
+  if (!element) return null;
+  for (const candidate of SELECTORS[key].candidates) {
+    const match = element.closest(candidate);
+    if (match) return match;
+  }
+  return null;
 }
 
 /** aria-label fragments the selectors depend on; snapshots keep these readable */
