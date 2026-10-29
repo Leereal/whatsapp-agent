@@ -14,6 +14,8 @@ const item = (id: string, notBeforeOffsetMs: number, title = id): OutboxItem => 
   failure_reason: null,
   created_at: new Date(clock).toISOString(),
   contact: { id: `c-${id}`, title, phone: null, is_test: false },
+  text: null,
+  draft: null,
 });
 
 const sent: SendOutcome = { kind: "done", status: "sent" };

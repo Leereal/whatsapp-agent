@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { callBackground } from "../../src/bridge";
 import { usePolling } from "../../src/ui/usePolling";
 import type { OutboxItem } from "../../src/shared/contract";
-import { ago, reasonText } from "../../src/ui/labels";
+import { ago, INTENTS, reasonText } from "../../src/ui/labels";
 
 const KIND: Record<string, string> = {
   pricing: "Pricing",
@@ -13,6 +13,15 @@ const KIND: Record<string, string> = {
   final_pdf: "Final CV",
 };
 
+/** "Ready to order · 72% sure" for a reply the assistant wrote */
+function draftNote(item: OutboxItem): string | null {
+  if (!item.draft) return null;
+  const intent = INTENTS[item.draft.intent] ?? item.draft.intent;
+  return item.draft.confidence == null
+    ? intent
+    : `${intent} · ${Math.round(item.draft.confidence * 100)}% sure`;
+}
+
 function countdown(iso: string | null, now: number): string {
   if (!iso) return "soon";
   const seconds = Math.round((new Date(iso).getTime() - now) / 1000);
@@ -20,7 +29,10 @@ function countdown(iso: string | null, now: number): string {
   return seconds < 90 ? `in ${seconds} s` : `in ${Math.round(seconds / 60)} min`;
 }
 
-/** Messages waiting for my approval, and messages scheduled to go out */
+/**
+ * Messages waiting for my approval, and messages scheduled to go out.
+ * Replies the assistant wrote show their text, so I approve what I've read.
+ */
 export function Outbox({ enabled }: { enabled: boolean }) {
   const [items, setItems] = useState<OutboxItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +81,8 @@ export function Outbox({ enabled }: { enabled: boolean }) {
   const waiting = items.filter(
     (item) => item.status === "needs_approval" || item.status === "failed",
   );
+  // "Send all" is for missed pricing; each reply is read and approved on its own
+  const sendable = waiting.filter((item) => item.status === "needs_approval" && item.kind !== "reply");
   const scheduled = items.filter(
     (item) => item.status === "scheduled" || item.status === "claimed",
   );
@@ -77,9 +91,9 @@ export function Outbox({ enabled }: { enabled: boolean }) {
     <section className="rounded-lg border border-gray-200 bg-white p-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold">Waiting for you ({waiting.length})</h2>
-        {waiting.length > 1 && (
+        {sendable.length > 1 && (
           <button
-            onClick={() => void sendAll(waiting.filter((item) => item.status === "needs_approval"))}
+            onClick={() => void sendAll(sendable)}
             disabled={busy !== null}
             className="text-xs text-brand underline disabled:opacity-50"
           >
@@ -106,6 +120,12 @@ export function Outbox({ enabled }: { enabled: boolean }) {
                 <p className="text-xs text-gray-500">
                   {KIND[item.kind] ?? item.kind} · {ago(item.created_at, now)}
                 </p>
+                {draftNote(item) && <p className="text-xs text-gray-500">{draftNote(item)}</p>}
+                {item.text && (
+                  <p className="mt-1 whitespace-pre-wrap break-words rounded bg-gray-50 p-2 text-xs text-gray-800">
+                    {item.text}
+                  </p>
+                )}
                 {item.status === "failed" && (
                   <p className="text-xs text-red-600">{reasonText(item.failure_reason)}</p>
                 )}
@@ -140,9 +160,15 @@ export function Outbox({ enabled }: { enabled: boolean }) {
                 <div className="min-w-0">
                   <p className="truncate text-sm">{item.contact.title}</p>
                   <p className="text-xs text-gray-500">
-                    {KIND[item.kind] ?? item.kind} ·{" "}
+                    {KIND[item.kind] ?? item.kind}
+                    {item.auto && item.kind === "reply" ? " (automatic)" : ""} ·{" "}
                     {item.status === "claimed" ? "sending…" : countdown(item.not_before, now)}
                   </p>
+                  {item.text && (
+                    <p className="mt-1 line-clamp-3 whitespace-pre-wrap break-words text-xs text-gray-700">
+                      {item.text}
+                    </p>
+                  )}
                 </div>
                 {item.status === "scheduled" && (
                   <button

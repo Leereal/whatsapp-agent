@@ -91,6 +91,9 @@ export const EVENT_TYPES = [
   "handoff_opened",
   "handoff_closed",
   "draft_failed",
+  "reply_scheduled",
+  "reply_queued",
+  "reply_sent",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
@@ -117,6 +120,21 @@ export const DRAFT_INTENTS = [
   "other",
 ] as const;
 export type DraftIntent = (typeof DRAFT_INTENTS)[number];
+
+/**
+ * Intents whose replies may ever go out without me, once switched on in
+ * settings. Payments, complaints, refunds, disputes, revisions and anything
+ * unrelated always wait for me.
+ */
+export const AUTO_REPLY_INTENTS = [
+  "greeting",
+  "pricing_question",
+  "ready_to_order",
+  "sent_cv",
+  "target_role_info",
+  "process_question",
+] as const;
+export type AutoReplyIntent = (typeof AUTO_REPLY_INTENTS)[number];
 
 /**
  * What a draft may suggest besides its text. The backend checks every one;
@@ -183,6 +201,10 @@ export interface WhatsAppSettings {
   label_stages: Record<string, OrderStage>;
   /** Price in rand of each product */
   product_prices: Record<Product, number>;
+  /** Intents the assistant may answer by itself; the rest wait in the queue */
+  auto_reply_intents: AutoReplyIntent[];
+  /** How sure the AI must be (0–1) before a reply goes out by itself */
+  auto_reply_min_confidence: number;
 }
 
 export type WhatsAppSettingsUpdate = Partial<WhatsAppSettings>;
@@ -262,7 +284,12 @@ export interface ScanRequest {
   chats: ScanChatRow[];
 }
 
-export type ScanAction = "none" | "scheduled" | "queued";
+/**
+ * scheduled / queued: pricing was scheduled or waits for approval.
+ * read: a client wrote again; open the chat and send its messages to
+ * /ext/auto-replies so the assistant can answer.
+ */
+export type ScanAction = "none" | "scheduled" | "queued" | "read";
 
 export interface ScanDecision {
   title: string;
@@ -292,6 +319,10 @@ export interface OutboxItem {
     phone: string | null;
     is_test: boolean;
   };
+  /** For a reply the assistant wrote: the text that will be sent */
+  text: string | null;
+  /** For a reply the assistant wrote: what it read and how sure it was */
+  draft: { intent: DraftIntent; confidence: number | null } | null;
 }
 
 /** POST /ext/outbox/:id/claim, called right before sending */
@@ -301,6 +332,8 @@ export interface ClaimResponse {
   /** When the refusal is temporary: try again after this */
   retry_after_seconds?: number;
   body?: string;
+  /** For a reply: the client's message it answers. Send only while that is still the chat's latest message. */
+  answers_message_id?: string;
 }
 
 /** POST /ext/outbox/:id/result */
@@ -369,6 +402,17 @@ export interface ChatSyncResponse {
 
 /** POST /ext/drafts: draft a reply for the open chat (adds the chat if it's new) */
 export type DraftRequest = ChatSyncRequest;
+
+/** POST /ext/auto-replies: a client's chat the extension read after a scan said "read" */
+export type AutoReplyRequest = ChatSyncRequest;
+
+export interface AutoReplyResponse {
+  /** scheduled: it goes out by itself; queued: it waits for my approval */
+  action: "scheduled" | "queued" | "none";
+  /** Why it isn't going out by itself, e.g. "intent_off", "low_confidence", "handed_off" */
+  reason?: string;
+  outbox?: OutboxItem;
+}
 
 export interface DraftAction {
   type: DraftActionType;

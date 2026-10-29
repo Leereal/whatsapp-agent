@@ -1,10 +1,12 @@
 import {
   adSource,
   assessChat,
+  assessReplyChat,
   comparable,
   currentChatTitle,
   findOurMessage,
   isChatOpen,
+  messagesAfter,
   openChat,
   openFailureDetails,
   readMessages,
@@ -190,6 +192,45 @@ describe("assessChat", () => {
 
   it("fails safe when no messages can be read", () => {
     expect(assessChat([])).toEqual({ isNew: false, reason: "no_messages_found" });
+  });
+});
+
+describe("assessReplyChat", () => {
+  const question = incoming("Do you also do cover letters?", 2);
+
+  it("lets a reply go while the message it answers is still the last one", () => {
+    const chat = [outgoing("Hi there! Get your CV…"), question];
+    expect(assessReplyChat(chat, question.id)).toEqual({ ok: true });
+  });
+
+  it("holds back once the chat has moved on", () => {
+    const later = incoming("Hello??", 3);
+    expect(assessReplyChat([question, later], question.id)).toEqual({
+      ok: false,
+      reason: "chat_moved_on",
+    });
+    expect(assessReplyChat([question, outgoing("Yes we do!")], question.id)).toEqual({
+      ok: false,
+      reason: "already_answered",
+    });
+  });
+
+  it("fails safe when it can't tell who wrote last", () => {
+    const unknown = { id: "3EB0X", outgoing: null, text: "Hello" };
+    expect(assessReplyChat([question, unknown], question.id)).toEqual({
+      ok: false,
+      reason: "direction_unknown",
+    });
+    expect(assessReplyChat([], question.id)).toEqual({ ok: false, reason: "no_messages_found" });
+  });
+
+  it("looks for an earlier copy of a reply only after the message it answers", () => {
+    const before = outgoing("Please send your old CV", 1);
+    const after = outgoing("Please send your old CV", 2);
+    expect(messagesAfter([before, question, after], question.id)).toEqual([after]);
+    expect(messagesAfter([before, question], question.id)).toEqual([]);
+    // Not on screen any more: nothing counts as an earlier copy
+    expect(messagesAfter([before, after], question.id)).toEqual([]);
   });
 });
 

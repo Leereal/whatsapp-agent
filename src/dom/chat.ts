@@ -339,6 +339,36 @@ export function assessChat(messages: ChatMessage[]): ChatAssessment {
   return { isNew: true, source: adSource(messages) };
 }
 
+export type ReplyAssessment =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: "no_messages_found" | "direction_unknown" | "already_answered" | "chat_moved_on";
+    };
+
+/**
+ * May a reply the assistant wrote go into the open chat? Only while the
+ * client's message it answers is still the chat's last message: once either
+ * of us wrote since, the reply no longer fits.
+ */
+export function assessReplyChat(
+  messages: ChatMessage[],
+  answersMessageId: string | null,
+): ReplyAssessment {
+  const last = messages[messages.length - 1];
+  if (!last) return { ok: false, reason: "no_messages_found" };
+  if (last.outgoing === null) return { ok: false, reason: "direction_unknown" };
+  if (last.outgoing) return { ok: false, reason: "already_answered" };
+  if (answersMessageId && last.id !== answersMessageId) return { ok: false, reason: "chat_moved_on" };
+  return { ok: true };
+}
+
+/** The messages after the one with this id; none when it isn't on screen */
+export function messagesAfter(messages: ChatMessage[], id: string | null | undefined): ChatMessage[] {
+  const index = id ? messages.findIndex((message) => message.id === id) : -1;
+  return index >= 0 ? messages.slice(index + 1) : [];
+}
+
 export function composer(root: ParentNode = document): HTMLElement | null {
   return query<HTMLElement>("composer", root);
 }

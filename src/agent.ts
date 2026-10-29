@@ -2,18 +2,21 @@ import type { ContentScriptContext } from "wxt/utils/content-script-context";
 import { callBackground, warnUnlessOffline } from "./bridge";
 import { OpenChatWatcher } from "./copilot";
 import { UserActivity } from "./dom/userActivity";
+import { PageLock } from "./pageLock";
 import { normalizePhone } from "./phone";
+import { ChatReader, readForReply, type ReadOutcome } from "./reader";
 import { ChatScanner } from "./scanner";
 import { SendScheduler } from "./scheduler";
-import { sendItem } from "./sender";
+import { sendItem, type SendOutcome } from "./sender";
 import { query } from "./selectors";
 import type { OutboxItem } from "./shared/contract";
 import { connectionStatus, whatsappHealth } from "./storage";
 
 /**
  * The assistant inside WhatsApp Web: watches the chat list, reports new leads
- * and labelled chats, runs scheduled sends one at a time, and backs off from
- * any chat I reply to myself.
+ * and labelled chats, reads chats of clients who wrote again (auto-replies),
+ * runs scheduled sends one at a time, and backs off from any chat I reply to
+ * myself.
  */
 
 const SCAN_DEBOUNCE_MS = 1_500;
@@ -39,14 +42,36 @@ export function startAgent(ctx: ContentScriptContext, doc: Document): void {
 
   const activity = new UserActivity(doc, (title) => {
     scheduler.removeChat(title);
+    reader.removeChat(title);
     callBackground({ type: "manual-reply", title, phone: normalizePhone(title) }).catch(warn);
   });
-  const scheduler = new SendScheduler((item) => sendItem(item, activity, doc), warn);
+  // Sending and reading both open chats, so only one runs at a time
+  const page = new PageLock();
+  const scheduler = new SendScheduler(
+    async (item) =>
+      (await page.run(() => sendItem(item, activity, doc))) ??
+      ({ kind: "retry", afterMs: 5_000, reason: "page_busy" } satisfies SendOutcome),
+    warn,
+  );
+  const reader = new ChatReader(
+    async (title) =>
+      (await page.run(() => readForReply(title, activity, doc))) ??
+      ({ kind: "retry", afterMs: 5_000, reason: "page_busy" } satisfies ReadOutcome),
+    warn,
+  );
   const scanner = new ChatScanner(doc, (decisions) => {
     for (const decision of decisions) {
       if (decision.action === "scheduled" && decision.outbox) scheduler.upsert(decision.outbox);
+      if (decision.action === "read") reader.add(decision.title);
     }
   });
+
+  // Sends come first; a chat is read only when no send is due
+  const tick = async () => {
+    if (await scheduler.tick()) return;
+    const read = await reader.tick();
+    if (read?.kind === "done" && read.outbox) scheduler.upsert(read.outbox);
+  };
 
   let scanning = false;
   const scan = async () => {
@@ -110,7 +135,7 @@ export function startAgent(ctx: ContentScriptContext, doc: Document): void {
   });
   ctx.setInterval(() => void openChat.check(), OPEN_CHAT_CHECK_MS);
 
-  ctx.setInterval(() => void scheduler.tick(), TICK_MS);
+  ctx.setInterval(() => void tick(), TICK_MS);
   ctx.setInterval(() => void syncOutbox(), OUTBOX_SYNC_MS);
   ctx.setTimeout(() => {
     observeChatList();

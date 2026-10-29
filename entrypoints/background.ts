@@ -196,6 +196,10 @@ function handleMessage(message: ExtensionMessage): Promise<unknown> | null {
       return proxy(() =>
         api.createDraft({ title: message.title, phone: message.phone, messages: message.messages }),
       );
+    case "auto-reply":
+      return proxy(() =>
+        api.autoReply({ title: message.title, phone: message.phone, messages: message.messages }),
+      );
     case "draft-outcome":
       return proxy(() => api.draftOutcome(message.id, message.outcome));
     case "draft-apply":

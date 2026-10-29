@@ -1,6 +1,8 @@
 import { API_BASE_URL } from "./config";
 import { installToken } from "./storage";
 import type {
+  AutoReplyRequest,
+  AutoReplyResponse,
   ChatSyncRequest,
   ChatSyncResponse,
   ClaimResponse,
@@ -127,6 +129,9 @@ export const api = {
 
   createDraft: (body: DraftRequest) =>
     request<DraftResponse>("/drafts", { method: "POST", body: JSON.stringify(body) }),
+
+  autoReply: (body: AutoReplyRequest) =>
+    request<AutoReplyResponse>("/auto-replies", { method: "POST", body: JSON.stringify(body) }),
 
   draftOutcome: (id: string, body: DraftOutcomeRequest) =>
     request<null>(`/drafts/${encodeURIComponent(id)}/outcome`, {

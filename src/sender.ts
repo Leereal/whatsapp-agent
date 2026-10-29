@@ -3,10 +3,12 @@ import { callBackground } from "./bridge";
 import {
   adSource,
   assessChat,
+  assessReplyChat,
   clearComposer,
   composerText,
   currentChatTitle,
   findOurMessage,
+  messagesAfter,
   openChat,
   openFailureDetails,
   pressSend,
@@ -19,14 +21,20 @@ import {
 } from "./dom/chat";
 import { runHealthCheck } from "./dom/healthCheck";
 import type { UserActivity } from "./dom/userActivity";
-import type { ClaimResponse, OutboxItem, OutboxResultRequest } from "./shared/contract";
+import type {
+  ClaimResponse,
+  ContactSource,
+  OutboxItem,
+  OutboxResultRequest,
+} from "./shared/contract";
 import { connectionStatus, localKillSwitch, whatsappHealth } from "./storage";
 
 /**
  * Sends one outbox message in WhatsApp Web:
  *   wait until I'm idle → claim (backend re-checks every rule) → open the
- *   chat → confirm it's a brand-new lead → type → send → confirm the bubble
- *   → report → go back to the chat I had open.
+ *   chat → confirm it's a brand-new lead (pricing), or that the client's
+ *   message a reply answers is still the last one → type → send → confirm
+ *   the bubble → report → go back to the chat I had open.
  * Any doubt stops the send. A message that may have gone out is never
  * retried blindly: the next attempt finds it in the chat and records it as
  * sent instead of sending it again.
@@ -38,7 +46,7 @@ export const USER_IDLE_MS = 20_000;
 const CLAIM_EXPIRY_MS = 3 * 60_000 + 5_000;
 
 /** The outbox reason for each way opening the chat can fail */
-const OPEN_FAILURES: Record<Exclude<OpenChatResult, "opened">, string> = {
+export const OPEN_FAILURES: Record<Exclude<OpenChatResult, "opened">, string> = {
   row_not_found: "chat_row_not_found",
   did_not_open: "chat_did_not_open",
   not_confirmed: "chat_not_confirmed",
@@ -119,23 +127,42 @@ export async function sendItem(
     if (interrupted()) return retry(CLAIM_EXPIRY_MS, "user_active");
 
     const messages = readMessages(doc);
-    // An earlier attempt sent it but couldn't confirm: record it, never send it twice
-    const earlier = findOurMessage(messages, body);
+    // Pricing goes to brand-new leads; everything else answers the client
+    const answersClient = item.kind !== "pricing";
+    // An earlier attempt sent it but couldn't confirm: record it, never send it twice.
+    // A reply is only looked for after the message it answers: I may have said the same before.
+    const earlier = findOurMessage(
+      answersClient ? messagesAfter(messages, claim.answers_message_id) : messages,
+      body,
+    );
     if (earlier) {
-      const source = adSource(messages);
+      const source = answersClient ? null : adSource(messages);
       await report({ status: "sent", wa_message_id: earlier.id, ...(source ? { source } : {}) });
       return done("sent");
     }
 
-    const assessment = assessChat(messages);
-    if (!assessment.isNew) {
-      if (assessment.reason === "no_messages_found") return await fail("no_messages_found");
-      if (assessment.reason === "direction_unknown") {
-        const seen = new Set(messages.map((message) => message.id));
-        return await failWithDetails("direction_unknown", sendFailureDetails(doc, seen, body));
+    const unreadable = () => {
+      const seen = new Set(messages.map((message) => message.id));
+      return failWithDetails("direction_unknown", sendFailureDetails(doc, seen, body));
+    };
+    let source: ContactSource | null = null;
+    if (answersClient) {
+      const fit = assessReplyChat(messages, claim.answers_message_id ?? null);
+      if (!fit.ok) {
+        if (fit.reason === "no_messages_found") return await fail("no_messages_found");
+        if (fit.reason === "direction_unknown") return await unreadable();
+        await report({ status: "skipped", reason: fit.reason });
+        return done("skipped");
       }
-      await report({ status: "skipped", reason: "existing_chat" });
-      return done("skipped");
+    } else {
+      const assessment = assessChat(messages);
+      if (!assessment.isNew) {
+        if (assessment.reason === "no_messages_found") return await fail("no_messages_found");
+        if (assessment.reason === "direction_unknown") return await unreadable();
+        await report({ status: "skipped", reason: "existing_chat" });
+        return done("skipped");
+      }
+      source = assessment.source;
     }
     // Never touch a message I'm writing
     if (composerText(doc)) return await fail("composer_not_empty");
@@ -159,11 +186,7 @@ export async function sendItem(
       return await failWithDetails("not_confirmed", sendFailureDetails(doc, before, body));
     }
 
-    await report({
-      status: "sent",
-      wa_message_id: sent.id,
-      ...(assessment.source ? { source: assessment.source } : {}),
-    });
+    await report({ status: "sent", wa_message_id: sent.id, ...(source ? { source } : {}) });
     return done("sent");
   } finally {
     if (previousChat && !sameTitle(previousChat, item.contact.title) && !interrupted()) {

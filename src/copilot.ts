@@ -25,7 +25,7 @@ import { openChatState } from "./storage";
  */
 
 /** Messages read for syncing and drafting */
-const READ_LIMIT = 30;
+export const READ_LIMIT = 30;
 /** A chat that wasn't a client's is asked about again after this (drafting adds it) */
 const UNKNOWN_RECHECK_MS = 60_000;
 

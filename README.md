@@ -5,7 +5,7 @@ CareerCVPro API (`careercvpro/backend`, `/api/v1/whatsapp/ext`) with a
 per-install token; it holds no API keys. Design and phases:
 `careercvpro/backend/plan.md` and `careercvpro/backend/CLAUDE.md`.
 
-Current phase: **2 (copilot replies)**.
+Current phase: **3 (selective auto-send)**.
 
 - **Pricing (phase 1).** The extension checks that WhatsApp Web still matches
   `src/selectors.ts`, reports labelled chats and new leads (unsaved numbers
@@ -22,12 +22,24 @@ Current phase: **2 (copilot replies)**.
   complaint, refund or payment dispute hands the chat to you, which turns
   automation off for it. Messages of client chats are copied to CareerCVPro
   so the dashboard shows the conversation; other chats are never sent.
+- **Automatic replies (phase 3).** Off until you tick kinds of message under
+  _Automatic replies_ in the dashboard's WhatsApp settings. Then, when a client
+  with an open order writes again, the scan answers "read": while you're idle
+  the extension opens that chat (which marks it read in WhatsApp), reads it
+  and sends it to CareerCVPro. A reply goes out by itself only for the ticked
+  kinds, when the AI is sure enough; any other reply waits in the side panel
+  with its text for **Send** or **Dismiss**. Payments, complaints, refunds,
+  disputes and change requests always wait for you. Before sending, the
+  extension checks that the client's message the reply answers is still the
+  chat's last one, so a reply never lands after the conversation moved on.
 
 | Path               | What                                                     |
 | ------------------ | -------------------------------------------------------- |
 | `src/agent.ts`     | Runs in WhatsApp Web: scanning, scheduling, manual-reply |
 | `src/scanner.ts`   | Reports changed chat-list rows to the backend            |
 | `src/scheduler.ts` | Runs due sends one at a time                             |
+| `src/reader.ts`    | Reads client chats for automatic replies, one at a time  |
+| `src/pageLock.ts`  | Keeps sending and reading from using the page at once    |
 | `src/sender.ts`    | One send, step by step; any doubt stops it               |
 | `src/copilot.ts`   | The open chat: sync, read for a draft, insert or send it |
 | `src/dom/chat.ts`  | Open a chat, read messages, type, send, confirm          |

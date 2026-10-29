@@ -21,6 +21,9 @@ const REASONS: Record<string, string> = {
   never_messaged_us: "They haven't messaged you",
   handed_off: "Handed off to you",
   opted_out: "They opted out",
+  already_answered: "The chat was already answered",
+  chat_moved_on: "They wrote again, so a newer reply replaces it",
+  superseded: "Replaced by a reply to their newer message",
 };
 
 export const STAGES: Record<string, string> = {
@@ -96,6 +99,9 @@ const EVENTS: Record<string, string> = {
   handoff_opened: "Handed to you",
   handoff_closed: "Handoff closed",
   draft_failed: "Draft failed",
+  reply_scheduled: "Reply scheduled (automatic)",
+  reply_queued: "Reply waiting for approval",
+  reply_sent: "Reply sent",
   selector_failure: "WhatsApp Web changed",
   selector_recovered: "WhatsApp Web check passed",
   kill_switch_on: "Kill switch on",

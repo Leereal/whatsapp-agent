@@ -1,5 +1,6 @@
 import type { ApiErrorKind } from "./api";
 import type {
+  AutoReplyRequest,
   ChatMessageInput,
   ChatSyncRequest,
   DraftOutcomeRequest,
@@ -44,6 +45,8 @@ export type ExtensionMessage =
   | { type: "events-list" }
   | ({ type: "chat-sync" } & ChatSyncRequest)
   | ({ type: "draft-create" } & DraftRequest)
+  /** content script → service worker: a client's chat read for an auto-reply */
+  | ({ type: "auto-reply" } & AutoReplyRequest)
   | { type: "draft-outcome"; id: string; outcome: DraftOutcomeRequest }
   | { type: "draft-apply"; id: string; actionIndex: number }
   | { type: "handoff-close"; contactId: string };
