@@ -6,7 +6,7 @@ import { takeSnapshot } from "../src/dom/snapshot";
 import type { ExtensionMessage, SnapshotReply } from "../src/messages";
 import { startAgent } from "../src/agent";
 import { insertDraft, readOpenChat } from "../src/copilot";
-import { captureMedia, listMedia, putFileInChat } from "../src/fileActions";
+import { captureMedia, listMedia, putFileInChat, readChatForCv } from "../src/fileActions";
 
 /**
  * Runs inside WhatsApp Web: checks the page against selectors.ts, and runs
@@ -50,11 +50,17 @@ export default defineContentScript({
         sendResponse(listMedia(document));
         return false;
       }
-      if (request?.type === "capture-media" || request?.type === "paste-file") {
+      if (
+        request?.type === "capture-media" ||
+        request?.type === "paste-file" ||
+        request?.type === "read-chat-for-cv"
+      ) {
         const work =
           request.type === "capture-media"
             ? captureMedia(document, request)
-            : putFileInChat(document, request);
+            : request.type === "paste-file"
+              ? putFileInChat(document, request)
+              : readChatForCv(document, request.title);
         work.then(sendResponse, () =>
           sendResponse({ ok: false, error: "Something went wrong in the WhatsApp tab." }),
         );

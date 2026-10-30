@@ -84,6 +84,50 @@ describe("listMediaMessages", () => {
     );
     expect(types).toMatchObject({ IN_PHOTO: "image", IN_DOC: "document", IN_TEXT: "none" });
   });
+
+  it("lists a photo they sent after another of their messages, which has no tail of its own", () => {
+    // WhatsApp only marks the first bubble of a run; the photo and document follow their text
+    const doc = new DOMParser().parseFromString(
+      `<div id="main">
+         <header><span dir="auto" title="${TITLE}">${TITLE}</span></header>
+         <div role="row"><div data-id="IN_FIRST">
+           <span data-icon="tail-in"></span>
+           <div data-pre-plain-text="[15:33, 30/10/2026] Thandi M: "><span data-testid="selectable-text">My CV</span></div>
+         </div></div>
+         <div role="row"><div data-id="IN_CV_PHOTO"><img src="blob:https://web.whatsapp.com/cv" alt=""></div></div>
+         <div role="row"><div data-id="IN_HEADSHOT"><img src="blob:https://web.whatsapp.com/me" alt=""></div></div>
+         <div role="row"><div data-id="OUT_REPLY">
+           <span data-icon="tail-out"></span>
+           <div data-pre-plain-text="[15:40, 30/10/2026] Me: "><span data-testid="selectable-text">Thanks</span></div>
+         </div></div>
+         <div role="row"><div data-id="OUT_PHOTO"><img src="blob:https://web.whatsapp.com/mine" alt=""></div></div>
+       </div>`,
+      "text/html",
+    );
+    expect(listMediaMessages(doc).map((item) => item.wa_message_id)).toEqual([
+      "IN_CV_PHOTO",
+      "IN_HEADSHOT",
+    ]);
+    expect(
+      readChatMessages(doc).map((message) => [message.wa_message_id, message.direction]),
+    ).toEqual([
+      ["IN_FIRST", "in"],
+      ["IN_CV_PHOTO", "in"],
+      ["IN_HEADSHOT", "in"],
+      ["OUT_REPLY", "out"],
+      ["OUT_PHOTO", "out"],
+    ]);
+  });
+
+  it("still leaves out a photo at the top of the chat with no sign of who sent it", () => {
+    const doc = new DOMParser().parseFromString(
+      `<div id="main"><header><span dir="auto" title="${TITLE}">${TITLE}</span></header>
+         <div role="row"><div data-id="UNKNOWN"><img src="blob:https://web.whatsapp.com/x" alt=""></div></div>
+       </div>`,
+      "text/html",
+    );
+    expect(listMediaMessages(doc)).toEqual([]);
+  });
 });
 
 describe("captureDocument", () => {
@@ -179,6 +223,26 @@ describe("waitForSentPhoto", () => {
         .insertAdjacentHTML(
           "beforeend",
           `<div role="row"><div data-id="NEW_OUT"><span data-icon="tail-out"></span><img src="blob:https://web.whatsapp.com/sent"></div></div>`,
+        );
+    }, 50);
+    expect(await waitForSentPhoto(doc, TITLE, before, 3_000)).toBe("NEW_OUT");
+  });
+
+  it("finds it when it follows a message of mine, so it has no tail", async () => {
+    const doc = chatPage();
+    doc
+      .querySelector('[role="application"]')!
+      .insertAdjacentHTML(
+        "beforeend",
+        `<div role="row"><div data-id="MY_TEXT"><span data-icon="tail-out"></span><div data-pre-plain-text="[17:15, 30/10/2026] Me: "><span data-testid="selectable-text">Here is your preview</span></div></div></div>`,
+      );
+    const before = messageIds(doc);
+    setTimeout(() => {
+      doc
+        .querySelector('[role="application"]')!
+        .insertAdjacentHTML(
+          "beforeend",
+          `<div role="row"><div data-id="NEW_OUT"><img src="blob:https://web.whatsapp.com/sent"></div></div>`,
         );
     }, 50);
     expect(await waitForSentPhoto(doc, TITLE, before, 3_000)).toBe("NEW_OUT");

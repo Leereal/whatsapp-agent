@@ -272,6 +272,8 @@ function handleMessage(message: ExtensionMessage): Promise<unknown> | null {
       return proxy(() => api.startCv(message.orderId));
     case "update-cv":
       return proxy(() => api.updateCv(message.orderId));
+    case "set-cv-engine":
+      return proxy(() => api.setCvEngine(message.orderId, message.engine));
     case "create-preview":
       return proxy(() => api.createPreview(message.orderId));
     case "file-content":

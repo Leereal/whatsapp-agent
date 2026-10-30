@@ -5,6 +5,7 @@ import type {
   AutoReplyRequest,
   ChatMessageInput,
   ChatSyncRequest,
+  CvEngine,
   DraftOutcomeRequest,
   DraftRequest,
   ManualReplyRequest,
@@ -35,6 +36,8 @@ export type ExtensionMessage =
   | { type: "list-media" }
   /** side panel → content script: read one of them; answers with CaptureResult */
   | { type: "capture-media"; title: string; waMessageId: string; kind: "image" | "document" }
+  /** side panel → content script: show long messages in full and send the chat to CareerCVPro before CV work; answers with CvChatReply */
+  | { type: "read-chat-for-cv"; title: string }
   /** side panel → content script: put a preview in the chat for me to send; answers with PasteResult */
   | { type: "paste-file"; title: string; outboxId: string; file: FilePayload; caption: string }
   /** content script → service worker: WhatsApp's download started since `since`; answers with ApiReply<SavedDownload | null> */
@@ -73,6 +76,7 @@ export type ExtensionMessage =
     }
   | { type: "start-cv"; orderId: string }
   | { type: "update-cv"; orderId: string }
+  | { type: "set-cv-engine"; orderId: string; engine: CvEngine }
   | { type: "create-preview"; orderId: string }
   /** answers with ApiReply<FilePayload> */
   | { type: "file-content"; fileId: string; filename: string }
@@ -87,6 +91,7 @@ export type OpenChatReply =
   | { error: string };
 export type InsertReply = { ok: true; sent: boolean } | { ok: false; error: string };
 export type MediaListReply = { title: string; items: MediaMessage[] } | { error: string };
+export type CvChatReply = { ok: true; messages: number } | { ok: false; error: string };
 /** A download WhatsApp started, as the service worker saw it */
 export interface SavedDownload {
   download_id: number;

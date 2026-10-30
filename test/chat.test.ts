@@ -4,11 +4,13 @@ import {
   assessReplyChat,
   comparable,
   currentChatTitle,
+  expandLongMessages,
   findOurMessage,
   isChatOpen,
   messagesAfter,
   openChat,
   openFailureDetails,
+  readChatMessages,
   readMessages,
   sameTitle,
   sendFailureDetails,
@@ -117,6 +119,58 @@ describe("reading the open chat", () => {
     const messages = readMessages(doc);
     expect(messages.map((message) => message.outgoing)).toEqual([false, true]);
     expect(messages[0]?.id).toBe("false_27821234567@c.us_3EB0C9F1A2");
+  });
+});
+
+describe("reading runs of messages", () => {
+  /** Their text (with a tail), a notice, then two more of theirs with no sign of their own */
+  function chatWithRun(): Document {
+    return new DOMParser().parseFromString(
+      `<div id="main"><header><span dir="auto" title="Thandi M">Thandi M</span></header>
+         <div role="row"><div data-id="FIRST">
+           <span data-icon="tail-in"></span>
+           <div data-pre-plain-text="[15:35, 30/10/2026] Thandi M: "><span data-testid="selectable-text">PERSONAL INFORMATION Thandi M, Cape Town…</span><div role="button" id="more">Read more</div></div>
+         </div></div>
+         <div role="row"><div data-id="NOTICE"><div data-testid="system_message">Messages are end-to-end encrypted</div></div></div>
+         <div role="row"><div data-id="SECOND">
+           <div data-pre-plain-text="[15:36, 30/10/2026] Thandi M: "><span data-testid="selectable-text">Please add my diploma</span></div>
+         </div></div>
+         <div role="row"><div data-id="THIRD"><img src="blob:https://web.whatsapp.com/photo" alt=""></div></div>
+       </div>`,
+      "text/html",
+    );
+  }
+
+  it("gives a message with no sign of its own the sender of the message before it", () => {
+    expect(readMessages(chatWithRun()).map((message) => [message.id, message.outgoing])).toEqual([
+      ["FIRST", false],
+      ["SECOND", false],
+      ["THIRD", false],
+    ]);
+  });
+
+  it("doesn't read the Read more link as part of the message", () => {
+    expect(readChatMessages(chatWithRun())[0]?.text).toBe(
+      "PERSONAL INFORMATION Thandi M, Cape Town…",
+    );
+  });
+
+  it("opens long messages so their whole text is read", async () => {
+    const doc = chatWithRun();
+    const more = doc.getElementById("more")!;
+    more.addEventListener("click", () => {
+      more.previousElementSibling!.textContent =
+        "PERSONAL INFORMATION Thandi M, Cape Town. Date of birth 09/02/89. Nationality: Zimbabwean";
+      more.remove();
+    });
+    expect(await expandLongMessages(doc)).toBe(1);
+    expect(readChatMessages(doc)[0]?.text).toContain("Nationality: Zimbabwean");
+  });
+
+  it("opens nothing when no message is cut off", async () => {
+    const doc = chatWithRun();
+    doc.getElementById("more")!.remove();
+    expect(await expandLongMessages(doc)).toBe(0);
   });
 });
 

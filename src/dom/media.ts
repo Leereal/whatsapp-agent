@@ -1,10 +1,11 @@
 import { base64ToBytes, bytesToBase64, mimeFor, type FilePayload } from "../bytes";
-import { query, queryAll, queryInside, resolve } from "../selectors";
+import { query, queryInside, resolve } from "../selectors";
 import {
   composer,
   composerText,
   currentChatTitle,
-  messageDirection,
+  messageDirections,
+  messageRows,
   parseMessageTime,
   sameTitle,
 } from "./chat";
@@ -36,10 +37,6 @@ export function filenameFromTitle(title: string | null | undefined): string | nu
   return match?.[1]?.trim() || null;
 }
 
-function messageRows(root: ParentNode): Element[] {
-  return queryAll("messageRow", root).filter((element) => !queryInside("systemMessage", element));
-}
-
 function rowById(root: ParentNode, id: string): Element | null {
   return messageRows(root).find((element) => element.getAttribute("data-id") === id) ?? null;
 }
@@ -53,11 +50,13 @@ export function mediaKind(element: Element): "image" | "document" | null {
 
 /** Photos and documents the client sent, newest last; mine and unreadable ones are left out */
 export function listMediaMessages(root: ParentNode = document): MediaMessage[] {
-  return messageRows(root)
-    .flatMap((element): MediaMessage[] => {
+  const rows = messageRows(root);
+  const directions = messageDirections(rows, root);
+  return rows
+    .flatMap((element, index): MediaMessage[] => {
       const id = element.getAttribute("data-id");
       const kind = mediaKind(element);
-      if (!id || !kind || messageDirection(element) !== false) return [];
+      if (!id || !kind || directions[index] !== false) return [];
       const download = queryInside("messageDocument", element);
       return [
         {
@@ -233,12 +232,14 @@ export async function waitForSentPhoto(
   while (Date.now() < deadline) {
     const open = currentChatTitle(doc);
     if (open && sameTitle(open, title)) {
-      const sent = messageRows(doc).find((element) => {
+      const rows = messageRows(doc);
+      const directions = messageDirections(rows, doc);
+      const sent = rows.find((element, index) => {
         const id = element.getAttribute("data-id");
         return (
           id &&
           !before.has(id) &&
-          messageDirection(element) === true &&
+          directions[index] === true &&
           Boolean(queryInside("messageImage", element))
         );
       });

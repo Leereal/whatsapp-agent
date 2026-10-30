@@ -1,6 +1,6 @@
 import type { FilePayload } from "./bytes";
 import { callBackground, warnUnlessOffline } from "./bridge";
-import { currentChatTitle, sameTitle } from "./dom/chat";
+import { currentChatTitle, expandLongMessages, readChatMessages, sameTitle } from "./dom/chat";
 import {
   captureDocument,
   capturePhoto,
@@ -11,7 +11,9 @@ import {
   type CaptureResult,
   type PasteResult,
 } from "./dom/media";
-import type { MediaListReply, SavedDownload } from "./messages";
+import type { CvChatReply, MediaListReply, SavedDownload } from "./messages";
+import { normalizePhone } from "./phone";
+import type { ChatSyncResponse } from "./shared/contract";
 
 /**
  * File work in the WhatsApp tab, asked for by the side panel: reading the
@@ -21,11 +23,34 @@ import type { MediaListReply, SavedDownload } from "./messages";
 
 /** How long after the preview is in the chat I have to press send */
 const SEND_WAIT_MS = 5 * 60_000;
+/** The most messages CareerCVPro takes in one sync */
+const CV_CHAT_LIMIT = 50;
 
 export function listMedia(doc: Document): MediaListReply {
   const title = currentChatTitle(doc);
   if (!title) return { error: "Open the client's chat in WhatsApp first." };
   return { title, items: listMediaMessages(doc) };
+}
+
+/**
+ * Before CV work: show every long message in full (WhatsApp hides the rest
+ * behind "Read more") and send the chat on screen to CareerCVPro, so the CV
+ * is written from everything the client typed.
+ */
+export async function readChatForCv(doc: Document, title: string): Promise<CvChatReply> {
+  const open = currentChatTitle(doc);
+  if (!open || !sameTitle(open, title)) {
+    return { ok: false, error: "That chat isn't open any more. Open it and try again." };
+  }
+  await expandLongMessages(doc);
+  const messages = readChatMessages(doc).slice(-CV_CHAT_LIMIT);
+  await callBackground<ChatSyncResponse>({
+    type: "chat-sync",
+    title: open,
+    phone: normalizePhone(open),
+    messages,
+  });
+  return { ok: true, messages: messages.length };
 }
 
 export async function captureMedia(

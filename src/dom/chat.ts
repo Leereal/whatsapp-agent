@@ -22,7 +22,7 @@ import {
 export interface ChatMessage {
   /** data-id: WhatsApp's message id ("3EB0…"; older versions "false_<chat>_3EB0…") */
   id: string;
-  /** true = I sent it, false = they did, null = can't tell (never guessed) */
+  /** true = I sent it, false = they did, null = can't tell (never guessed; see messageDirections) */
   outgoing: boolean | null;
   text: string;
 }
@@ -211,16 +211,95 @@ export function messageDirection(element: Element): boolean | null {
   return signals.size === 1 ? signals.has(true) : null;
 }
 
-/** Messages in the open chat, without WhatsApp's notices (encryption, "not a contact") */
+/** A message with something in it (text, a photo, a document), not a WhatsApp notice */
+function hasContent(element: Element): boolean {
+  return Boolean(
+    queryInside("messageText", element) ??
+    queryInside("messageImage", element) ??
+    queryInside("messageDocument", element),
+  );
+}
+
+/**
+ * Which side of the chat a bubble is on: theirs on the left, mine on the
+ * right. Null when it can't be measured or a wide bubble crosses the middle.
+ */
+function sideOf(element: Element, panel: Element | null): boolean | null {
+  const content =
+    queryInside("messageImage", element) ??
+    queryInside("messageDocument", element) ??
+    queryInside("messageText", element);
+  if (!content || !panel) return null;
+  const box = content.getBoundingClientRect();
+  const area = panel.getBoundingClientRect();
+  if (box.width === 0 || area.width === 0) return null;
+  const middle = area.left + area.width / 2;
+  if (box.right < middle) return false;
+  if (box.left > middle) return true;
+  return null;
+}
+
+/**
+ * Who sent each message, in chat order (true = me, false = them, null =
+ * can't tell). WhatsApp only marks the first bubble of a run of messages
+ * from one sender (its tail, and a hidden "You:" or name label on text), so
+ * a later photo or document in a run often has no sign of its own. Such a
+ * message is placed by which side of the chat its bubble is on, or else was
+ * sent by whoever sent the message before it: a new sender always starts a
+ * new run, with a tail. Mixed signs still give null.
+ */
+export function messageDirections(rows: Element[], root: ParentNode): (boolean | null)[] {
+  const panel = resolve("conversationPanel", root).elements[0] ?? null;
+  let previous: boolean | null = null;
+  return rows.map((row) => {
+    const signals = new Set(directionSignals(row));
+    if (!hasContent(row)) return signals.size === 1 ? signals.has(true) : null;
+    const direction =
+      signals.size === 1
+        ? signals.has(true)
+        : signals.size > 1
+          ? null
+          : (sideOf(row, panel) ?? previous);
+    previous = direction;
+    return direction;
+  });
+}
+
+/** The open chat's message rows, without WhatsApp's notices (encryption, "not a contact") */
+export function messageRows(root: ParentNode = document): Element[] {
+  return queryAll("messageRow", root).filter((element) => !queryInside("systemMessage", element));
+}
+
+/** Messages in the open chat */
 export function readMessages(root: ParentNode = document): ChatMessage[] {
-  return queryAll("messageRow", root)
-    .filter((element) => !queryInside("systemMessage", element))
-    .map((element) => ({
+  const rows = messageRows(root);
+  const directions = messageDirections(rows, root);
+  return rows
+    .map((element, index) => ({
       id: element.getAttribute("data-id") ?? "",
-      outgoing: messageDirection(element),
+      outgoing: directions[index] ?? null,
       text: elementText(element),
     }))
     .filter((message) => message.id !== "");
+}
+
+/** WhatsApp's "Read more" link under a long message, which shows the rest of it */
+const isReadMore = (element: Element) =>
+  element.getAttribute("role") === "button" &&
+  /^read more$/i.test((element.textContent ?? "").trim());
+
+/**
+ * Show the whole of every long message in the open chat: WhatsApp cuts them
+ * off behind "Read more", and the rest isn't on the page until it's clicked.
+ * Returns how many were opened.
+ */
+export async function expandLongMessages(root: ParentNode = document): Promise<number> {
+  const links = messageRows(root).flatMap((row) =>
+    Array.from(row.querySelectorAll('[role="button"]')).filter(isReadMore),
+  );
+  for (const link of links) clickLikeUser(link);
+  if (links.length > 0) await waitFor(() => !links.some((link) => link.isConnected), 1_500);
+  return links.length;
 }
 
 /** Text as written: emoji (drawn as images) become their characters, <br> a line break */
@@ -231,6 +310,7 @@ function plainText(node: Node): string {
     return node.getAttribute("data-plain-text") ?? node.getAttribute("alt") ?? "";
   }
   if (node.tagName === "BR") return "\n";
+  if (isReadMore(node)) return "";
   return Array.from(node.childNodes).map(plainText).join("");
 }
 
@@ -271,35 +351,31 @@ export function parseMessageTime(value: string | null): string | null {
  * Messages whose sender can't be told are left out rather than guessed.
  */
 export function readChatMessages(root: ParentNode = document): ChatMessageInput[] {
-  return queryAll("messageRow", root)
-    .filter((element) => !queryInside("systemMessage", element))
-    .flatMap((element): ChatMessageInput[] => {
-      const id = element.getAttribute("data-id");
-      const outgoing = messageDirection(element);
-      if (!id || outgoing === null) return [];
+  const rows = messageRows(root);
+  const directions = messageDirections(rows, root);
+  return rows.flatMap((element, index): ChatMessageInput[] => {
+    const id = element.getAttribute("data-id");
+    const outgoing = directions[index] ?? null;
+    if (!id || outgoing === null) return [];
 
-      const textElement = queryInside("messageText", element);
-      const text = textElement
-        ? plainText(textElement)
-            .replace(/[‎‏]/g, "")
-            .trim()
-        : "";
-      return [
-        {
-          wa_message_id: id,
-          direction: outgoing ? "out" : "in",
-          text,
-          media_type: queryInside("messageDocument", element)
-            ? "document"
-            : queryInside("messageImage", element)
-              ? "image"
-              : "none",
-          sent_at: parseMessageTime(
-            queryInside("messageMeta", element)?.getAttribute("data-pre-plain-text") ?? null,
-          ),
-        },
-      ];
-    });
+    const textElement = queryInside("messageText", element);
+    const text = textElement ? plainText(textElement).replace(/[‎‏]/g, "").trim() : "";
+    return [
+      {
+        wa_message_id: id,
+        direction: outgoing ? "out" : "in",
+        text,
+        media_type: queryInside("messageDocument", element)
+          ? "document"
+          : queryInside("messageImage", element)
+            ? "image"
+            : "none",
+        sent_at: parseMessageTime(
+          queryInside("messageMeta", element)?.getAttribute("data-pre-plain-text") ?? null,
+        ),
+      },
+    ];
+  });
 }
 
 /** The greeting Meta sends for a Click-to-WhatsApp ad; it doesn't mean I've replied */

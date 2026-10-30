@@ -54,7 +54,7 @@ function chatPage(title = "+27 60 000 1234") {
 }
 
 describe("reading the open chat for a draft", () => {
-  it("reads text with emoji, photos and times, and skips messages it can't attribute", () => {
+  it("reads text with emoji, photos and times; a message with no sign follows the one before it", () => {
     const { doc } = chatPage();
     expect(readChatMessages(doc)).toEqual([
       {
@@ -65,6 +65,13 @@ describe("reading the open chat for a draft", () => {
         sent_at: local(2026, 10, 28, 14, 5),
       },
       { wa_message_id: "3EB0PHOTO", direction: "in", text: "", media_type: "image", sent_at: null },
+      {
+        wa_message_id: "3EB0NOSIGN",
+        direction: "in",
+        text: "?",
+        media_type: "none",
+        sent_at: null,
+      },
     ]);
   });
 

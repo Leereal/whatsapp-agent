@@ -8,6 +8,7 @@ import type {
   ChatSyncResponse,
   ClaimResponse,
   CurrentChat,
+  CvEngine,
   DraftOutcomeRequest,
   DraftRequest,
   DraftResponse,
@@ -208,6 +209,12 @@ export const api = {
     request<WhatsAppJob>(`/orders/${encodeURIComponent(orderId)}/update-cv`, {
       method: "POST",
       body: JSON.stringify({}),
+    }),
+
+  setCvEngine: (orderId: string, engine: CvEngine) =>
+    request<OrderPipeline>(`/orders/${encodeURIComponent(orderId)}/cv-engine`, {
+      method: "POST",
+      body: JSON.stringify({ engine }),
     }),
 
   createPreview: (orderId: string) =>

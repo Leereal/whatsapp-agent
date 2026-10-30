@@ -96,6 +96,7 @@ export const EVENT_TYPES = [
   "reply_sent",
   "file_saved",
   "cv_draft_ready",
+  "cv_engine_changed",
   "preview_ready",
   "preview_sent",
   "job_failed",
@@ -170,12 +171,20 @@ export type DraftOutcome = (typeof DRAFT_OUTCOMES)[number];
 /**
  * What a stored client file is. "other" is a client's supporting document,
  * such as a certificate, ID or reference letter: it is read with their CV.
+ * "profile_photo" is the photo they want on their CV (needs migration 04b).
  */
-export const FILE_KINDS = ["original_cv", "pop", "preview", "final_pdf", "other"] as const;
+export const FILE_KINDS = [
+  "original_cv",
+  "pop",
+  "preview",
+  "final_pdf",
+  "other",
+  "profile_photo",
+] as const;
 export type FileKind = (typeof FILE_KINDS)[number];
 
 /** Kinds the extension or I may upload; previews and final PDFs are made by CareerCVPro */
-export const UPLOAD_FILE_KINDS = ["original_cv", "pop", "other"] as const;
+export const UPLOAD_FILE_KINDS = ["original_cv", "pop", "other", "profile_photo"] as const;
 export type UploadFileKind = (typeof UPLOAD_FILE_KINDS)[number];
 
 /** File types a client's CV can arrive as (the ones CV Studio reads) */
@@ -191,6 +200,14 @@ export const CV_FILE_TYPES = [
 
 /** Largest file that can be saved (the same limit as CV Studio uploads) */
 export const MAX_FILE_BYTES = 15 * 1024 * 1024;
+
+/**
+ * Where a client's CV is written: CV Builder (the default; Executive Teal,
+ * edited in the builder's form) or CV Studio (written as one document).
+ * Needs migration 04c.
+ */
+export const CV_ENGINES = ["cv_builder", "cv_studio"] as const;
+export type CvEngine = (typeof CV_ENGINES)[number];
 
 export const JOB_TYPES = [
   "cv_draft",
@@ -541,8 +558,15 @@ export interface WhatsAppJob {
 export interface OrderPipeline {
   order_id: string;
   stage: OrderStage;
+  /** Where the CV is written; older backends don't send it (CV Studio) */
+  engine: CvEngine;
   cv_studio_session_id: string | null;
-  /** The CV's latest version in CV Studio; 0 before anything is written */
+  /** The CV Builder resume, opened at /cv-builder?id= */
+  resume_id: string | null;
+  /**
+   * 0 before the CV is written. In CV Studio, its latest version; in CV
+   * Builder, 1 once the resume exists.
+   */
   cv_version: number;
   /** Newest first */
   files: WhatsAppFile[];
@@ -596,6 +620,11 @@ export interface CreatePreviewRequest {
 /** POST /admin/orders/:id/cv-studio: link a CV I started in CV Studio myself */
 export interface LinkCvStudioRequest {
   session_id: string;
+}
+
+/** POST /ext/orders/:id/cv-engine and /admin/orders/:id/cv-engine; answers with the OrderPipeline */
+export interface SetCvEngineRequest {
+  engine: CvEngine;
 }
 
 // ------------------------------------------------------------------
