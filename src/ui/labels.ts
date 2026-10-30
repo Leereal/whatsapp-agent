@@ -27,6 +27,11 @@ const REASONS: Record<string, string> = {
   could_not_paste: "Couldn't put it in the chat",
   not_sent: "It wasn't sent within 5 minutes",
   sent_by_hand: "Send it from the client's chat",
+  nothing_new: "Nothing new from the client since the last version",
+  no_cv_to_update: "There's no CV to update yet",
+  no_client_files: "No files from the client are saved",
+  cv_studio_could_not_write: "CV Studio couldn't write it",
+  no_cv_written: "CV Studio didn't write a CV",
 };
 
 export const STAGES: Record<string, string> = {

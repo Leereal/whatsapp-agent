@@ -198,10 +198,16 @@ export const api = {
     });
   },
 
-  startCv: (orderId: string, fileId?: string) =>
+  startCv: (orderId: string) =>
     request<WhatsAppJob>(`/orders/${encodeURIComponent(orderId)}/start-cv`, {
       method: "POST",
-      body: JSON.stringify(fileId ? { file_id: fileId } : {}),
+      body: JSON.stringify({}),
+    }),
+
+  updateCv: (orderId: string) =>
+    request<WhatsAppJob>(`/orders/${encodeURIComponent(orderId)}/update-cv`, {
+      method: "POST",
+      body: JSON.stringify({}),
     }),
 
   createPreview: (orderId: string) =>

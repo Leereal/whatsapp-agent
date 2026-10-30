@@ -269,7 +269,9 @@ function handleMessage(message: ExtensionMessage): Promise<unknown> | null {
         }),
       );
     case "start-cv":
-      return proxy(() => api.startCv(message.orderId, message.fileId));
+      return proxy(() => api.startCv(message.orderId));
+    case "update-cv":
+      return proxy(() => api.updateCv(message.orderId));
     case "create-preview":
       return proxy(() => api.createPreview(message.orderId));
     case "file-content":

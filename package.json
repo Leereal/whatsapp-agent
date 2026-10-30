@@ -2,7 +2,7 @@
   "name": "whatsapp-agent",
   "description": "CareerCVPro WhatsApp assistant: Chrome extension for WhatsApp Web",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "scripts": {
     "dev": "wxt",

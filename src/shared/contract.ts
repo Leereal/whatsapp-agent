@@ -167,7 +167,10 @@ export type TemplateKind = (typeof TEMPLATE_ACTIONS)[keyof typeof TEMPLATE_ACTIO
 export const DRAFT_OUTCOMES = ["inserted", "sent", "edited", "discarded"] as const;
 export type DraftOutcome = (typeof DRAFT_OUTCOMES)[number];
 
-/** What a stored client file is */
+/**
+ * What a stored client file is. "other" is a client's supporting document,
+ * such as a certificate, ID or reference letter: it is read with their CV.
+ */
 export const FILE_KINDS = ["original_cv", "pop", "preview", "final_pdf", "other"] as const;
 export type FileKind = (typeof FILE_KINDS)[number];
 
@@ -547,6 +550,18 @@ export interface OrderPipeline {
   jobs: WhatsAppJob[];
   /** The preview waiting for me to send it */
   preview: OutboxItem | null;
+  /** What the client sent after the CV was last written from the chat */
+  changes: CvChanges;
+}
+
+/** The client's messages and files that "Update CV from chat" would use */
+export interface CvChanges {
+  /** When the CV was last written from their files and messages; null before that */
+  since: string | null;
+  /** Their messages since then */
+  messages: number;
+  /** Their CVs and supporting documents saved since then */
+  files: number;
 }
 
 /** POST /ext/orders/:id/files and /admin/orders/:id/files (multipart: file, kind, wa_message_id?) */
@@ -558,11 +573,19 @@ export interface UploadFileResponse {
   job: WhatsAppJob | null;
 }
 
-/** POST /ext/orders/:id/start-cv and /admin/orders/:id/start-cv */
+/**
+ * POST /ext/orders/:id/start-cv and /admin/orders/:id/start-cv: write the CV
+ * from every file the client sent and the chat. A draft waiting to start
+ * (CV autostart waits for more files) starts at once.
+ */
 export interface StartCvRequest {
-  /** The client's CV to write from; the latest one when left out */
+  /** Sent by older extensions; every saved file is used */
   file_id?: string;
 }
+
+// POST /ext/orders/:id/update-cv and /admin/orders/:id/update-cv (no body):
+// CV Studio applies what the client sent since the CV was last written
+// (OrderPipeline.changes) as a new version. Answers with the WhatsAppJob.
 
 /** POST /ext/orders/:id/preview and /admin/orders/:id/preview */
 export interface CreatePreviewRequest {

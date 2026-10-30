@@ -71,7 +71,8 @@ export type ExtensionMessage =
       waMessageId: string | null;
       file: FilePayload;
     }
-  | { type: "start-cv"; orderId: string; fileId?: string }
+  | { type: "start-cv"; orderId: string }
+  | { type: "update-cv"; orderId: string }
   | { type: "create-preview"; orderId: string }
   /** answers with ApiReply<FilePayload> */
   | { type: "file-content"; fileId: string; filename: string }
