@@ -23,6 +23,29 @@ export interface MediaMessage {
   /** The document's name, when WhatsApp shows one */
   filename: string | null;
   sent_at: string | null;
+  /** A small copy of a photo for the side panel's list (stays in the browser); null until it has loaded */
+  thumbnail: string | null;
+}
+
+const THUMBNAIL_SIZE = 64;
+
+/** The photo in a message drawn small; null when it hasn't loaded or can't be drawn */
+function thumbnailOf(row: Element): string | null {
+  const images = Array.from(row.querySelectorAll<HTMLImageElement>('img[src^="blob:"]'));
+  const photo = images.sort((a, b) => b.naturalWidth - a.naturalWidth)[0];
+  if (!photo || !photo.complete || !photo.naturalWidth) return null;
+  try {
+    const scale = THUMBNAIL_SIZE / Math.max(photo.naturalWidth, photo.naturalHeight);
+    const canvas = row.ownerDocument.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(photo.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(photo.naturalHeight * scale));
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.drawImage(photo, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.7);
+  } catch {
+    return null;
+  }
 }
 
 /** How many of the client's latest files the side panel offers */
@@ -66,6 +89,7 @@ export function listMediaMessages(root: ParentNode = document): MediaMessage[] {
           sent_at: parseMessageTime(
             queryInside("messageMeta", element)?.getAttribute("data-pre-plain-text") ?? null,
           ),
+          thumbnail: kind === "image" ? thumbnailOf(element) : null,
         },
       ];
     })

@@ -68,12 +68,13 @@ describe("filenameFromTitle", () => {
 describe("listMediaMessages", () => {
   it("lists the client's photos and documents, not mine or plain text", () => {
     expect(listMediaMessages(chatPage())).toEqual([
-      { wa_message_id: "IN_PHOTO", kind: "image", filename: null, sent_at: null },
+      { wa_message_id: "IN_PHOTO", kind: "image", filename: null, sent_at: null, thumbnail: null },
       {
         wa_message_id: "IN_DOC",
         kind: "document",
         filename: "Thandi CV 2026.pdf",
         sent_at: new Date(2026, 9, 28, 10, 15).toISOString(),
+        thumbnail: null,
       },
     ]);
   });

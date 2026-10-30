@@ -11,7 +11,6 @@ import {
   type CvEngine,
   type OrderPipeline,
   type TakeOutboxResponse,
-  type UploadFileKind,
   type UploadFileResponse,
   type WhatsAppJob,
 } from "../../src/shared/contract";
@@ -33,22 +32,8 @@ const KIND_LABELS = { image: "Photo", document: "Document" } as const;
 
 const ENGINE_NAMES: Record<CvEngine, string> = { cv_builder: "CV Builder", cv_studio: "CV Studio" };
 
-const SAVED_AS: Partial<Record<string, string>> = {
-  original_cv: "Saved as CV",
-  other: "Saved as certificate / other",
-  profile_photo: "Saved as their photo",
-};
-
-/** How a file in the chat can be saved: as (part of) their CV, a supporting document, or their photo (photos only) */
-const SAVE_AS: { kind: UploadFileKind; label: string; title: string }[] = [
-  { kind: "original_cv", label: "CV", title: "Their CV, or one page of it" },
-  {
-    kind: "other",
-    label: "Certificate / other",
-    title: "A certificate, ID, reference letter or other document, read with their CV",
-  },
-  { kind: "profile_photo", label: "Photo", title: "The photo they want on their CV" },
-];
+/** Their own files for the CV, however they were saved */
+const CLIENT_KINDS = new Set(["original_cv", "other", "profile_photo"]);
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
@@ -148,21 +133,39 @@ export function CvPanel({ enabled, dashboardUrl }: { enabled: boolean; dashboard
     }
   };
 
-  const upload = async (file: FilePayload, waMessageId: string | null, kind: UploadFileKind) => {
-    const result = await callBackground<UploadFileResponse>({
+  const cvJob = pipeline?.jobs.find((job) => job.type === "cv_draft");
+  const writing = Boolean(cvJob && isActive(cvJob));
+  const waitMinutes = cvJob ? minutesToStart(cvJob) : 0;
+  // Older backends don't report changes, or where the CV is written (CV Studio then)
+  const changes = pipeline?.changes ?? null;
+  const engine: CvEngine = pipeline?.engine ?? "cv_studio";
+  const cvLink =
+    engine === "cv_builder"
+      ? pipeline?.resume_id
+        ? `/cv-builder?id=${pipeline.resume_id}`
+        : null
+      : pipeline?.cv_studio_session_id
+        ? `/cv-studio?session=${pipeline.cv_studio_session_id}`
+        : null;
+
+  // Their saved files, by the chat message they came from
+  const savedIds = new Set(
+    pipeline?.files
+      .filter((file) => CLIENT_KINDS.has(file.kind))
+      .map((file) => file.source_wa_message_id) ?? [],
+  );
+  const savedCount = pipeline?.files.filter((file) => CLIENT_KINDS.has(file.kind)).length ?? 0;
+  const unsaved = media.filter((item) => !savedIds.has(item.wa_message_id));
+
+  const upload = (file: FilePayload, waMessageId: string | null) =>
+    callBackground<UploadFileResponse>({
       type: "file-upload",
       orderId,
-      kind,
+      // CV pages, certificates and their photo alike: the CV job tells them apart
+      kind: "original_cv",
       waMessageId,
       file,
     });
-    if (result.duplicate) return "That file was already saved.";
-    if (kind === "other") return "Saved. It's read with their CV.";
-    if (kind === "profile_photo") return "Saved. It goes on their CV.";
-    return result.job
-      ? "Saved as their CV. Writing starts in about 2 minutes, so save their other files now."
-      : "Saved as their CV.";
-  };
 
   /** Show their long messages in full and send the chat, so the CV uses all they typed */
   const readChat = async () => {
@@ -171,55 +174,73 @@ export function CvPanel({ enabled, dashboardUrl }: { enabled: boolean; dashboard
     if (!read.reply.ok) throw new Error(read.reply.error);
   };
 
-  const saveFromChat = (item: MediaMessage, kind: UploadFileKind) =>
-    run(`save-${item.wa_message_id}`, async () => {
+  /** Save every file of theirs in the chat that isn't saved yet; returns what couldn't be read */
+  const saveAllFromChat = async (): Promise<{ saved: number; problems: string[] }> => {
+    let saved = 0;
+    const problems: string[] = [];
+    for (const item of unsaved) {
       const read = await askWhatsAppTab<CaptureResult>({
         type: "capture-media",
         title,
         waMessageId: item.wa_message_id,
         kind: item.kind,
       });
-      if (read.status !== "ok") throw new Error(TAB_PROBLEMS[read.status]);
-      if (!read.reply.ok) throw new Error(read.reply.error);
-      const saved = await upload(read.reply.file, item.wa_message_id, kind);
-      // Their messages around the file usually say what it's for
-      await readChat().catch(() => undefined);
-      return saved;
+      if (read.status !== "ok") problems.push(TAB_PROBLEMS[read.status]);
+      else if (!read.reply.ok) problems.push(read.reply.error);
+      else {
+        await upload(read.reply.file, item.wa_message_id);
+        saved += 1;
+      }
+    }
+    return { saved, problems };
+  };
+
+  const savedText = ({ saved, problems }: { saved: number; problems: string[] }) =>
+    [
+      saved > 0 ? `${plural(saved, "file")} saved.` : "",
+      problems.length > 0
+        ? `${plural(problems.length, "file")} couldn't be saved: ${problems[0]}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+  /** One click: choose where it's written, save their files, read the chat, write the CV */
+  const writeCv = (choice: CvEngine) =>
+    run(`write-${choice}`, async () => {
+      if (choice !== engine) {
+        await callBackground({ type: "set-cv-engine", orderId, engine: choice });
+      }
+      const result = await saveAllFromChat();
+      await readChat();
+      await callBackground({ type: "start-cv", orderId });
+      return `Writing the CV in ${ENGINE_NAMES[choice]} from their files and your chat. ${savedText(result)}`.trim();
     });
 
-  const uploadChosen = (chosen: File | undefined, kind: UploadFileKind) => {
+  const updateCv = () =>
+    run("update", async () => {
+      const result = await saveAllFromChat();
+      // Messages the panel hasn't seen yet may be on screen
+      await readChat();
+      await callBackground({ type: "update-cv", orderId });
+      return `Updating the CV with what they sent. ${savedText(result)}`.trim();
+    });
+
+  const uploadChosen = (chosen: File | undefined) => {
     if (!chosen) return;
-    void run(`upload-${kind}`, async () => {
+    void run("upload", async () => {
       if (chosen.size > MAX_FILE_BYTES) throw new Error("The file is larger than 15 MB.");
-      return upload(
+      const result = await upload(
         {
           base64: bytesToBase64(await chosen.arrayBuffer()),
           mime: mimeFor(chosen.name, chosen.type),
           filename: chosen.name,
         },
         null,
-        kind,
       );
+      return result.duplicate ? "That file was already saved." : "Saved with their other files.";
     });
   };
-
-  const uploadLink = (kind: UploadFileKind, label: string) => (
-    <label className="cursor-pointer text-xs text-brand underline">
-      {busy === `upload-${kind}` ? "Uploading…" : label}
-      <input
-        type="file"
-        accept={
-          kind === "profile_photo" ? "image/jpeg,image/png,image/webp" : CV_FILE_TYPES.join(",")
-        }
-        className="hidden"
-        disabled={busy !== null}
-        onChange={(event) => {
-          uploadChosen(event.target.files?.[0], kind);
-          event.target.value = "";
-        }}
-      />
-    </label>
-  );
 
   const putPreviewInChat = (outboxId: string) =>
     run("paste", async () => {
@@ -239,25 +260,6 @@ export function CvPanel({ enabled, dashboardUrl }: { enabled: boolean; dashboard
         : "It's in the chat. Add the caption if you want one, then press send.";
     });
 
-  const savedKinds = new Map(
-    pipeline?.files.map((file) => [file.source_wa_message_id, file.kind] as const) ?? [],
-  );
-  const cvCount = pipeline?.files.filter((file) => file.kind === "original_cv").length ?? 0;
-  const otherCount = pipeline?.files.filter((file) => file.kind === "other").length ?? 0;
-  const hasPhoto = pipeline?.files.some((file) => file.kind === "profile_photo") ?? false;
-  const cvJob = pipeline?.jobs.find((job) => job.type === "cv_draft");
-  const waitMinutes = cvJob ? minutesToStart(cvJob) : 0;
-  // Older backends don't report changes, or where the CV is written (CV Studio then)
-  const changes = pipeline?.changes ?? null;
-  const engine: CvEngine = pipeline?.engine ?? "cv_studio";
-  const cvLink =
-    engine === "cv_builder"
-      ? pipeline?.resume_id
-        ? `/cv-builder?id=${pipeline.resume_id}`
-        : null
-      : pipeline?.cv_studio_session_id
-        ? `/cv-studio?session=${pipeline.cv_studio_session_id}`
-        : null;
   const previewJob = pipeline?.jobs.find((job) => job.type === "preview");
   const preview = pipeline?.preview ?? null;
   const shownThumbnail = preview && thumbnail?.fileId === preview.file_id ? thumbnail.url : null;
@@ -266,77 +268,69 @@ export function CvPanel({ enabled, dashboardUrl }: { enabled: boolean; dashboard
     <section className="rounded-lg border border-gray-200 bg-white p-3">
       <h2 className="text-sm font-semibold">CV &amp; preview</h2>
 
-      {/* The client's files in this chat */}
+      {/* The client's files: all of them go into the CV */}
       <div className="mt-2">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
-          Their files in this chat
-        </p>
+        <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">Their files</p>
         {media.length === 0 ? (
           <p className="mt-1 text-xs text-gray-500">
-            No photos or documents from them on screen. Scroll up to show older ones.
+            {savedCount > 0
+              ? `${plural(savedCount, "file")} saved. Scroll up in the chat to see them.`
+              : "No photos or documents from them on screen. Scroll up to show older ones."}
           </p>
         ) : (
-          <ul className="mt-1 divide-y divide-gray-100">
+          <ul className="mt-1 flex flex-wrap gap-1.5">
             {media.map((item) => (
               <li
                 key={item.wa_message_id}
-                className="flex items-center justify-between gap-2 py-1.5"
+                className="relative"
+                title={`${KIND_LABELS[item.kind]}${item.filename ? ` · ${item.filename}` : ""}${savedIds.has(item.wa_message_id) ? " (saved)" : ""}`}
               >
-                <span className="min-w-0 truncate text-xs">
-                  {KIND_LABELS[item.kind]}
-                  {item.filename ? ` · ${item.filename}` : ""}
-                </span>
-                {savedKinds.has(item.wa_message_id) ? (
-                  <span className="shrink-0 text-xs text-emerald-700">
-                    {SAVED_AS[savedKinds.get(item.wa_message_id) ?? ""] ?? "Saved"}
-                  </span>
-                ) : busy === `save-${item.wa_message_id}` ? (
-                  <span className="shrink-0 text-xs text-gray-500">Saving…</span>
+                {item.thumbnail ? (
+                  <img
+                    src={item.thumbnail}
+                    alt=""
+                    className="h-12 w-12 rounded border border-gray-200 object-cover"
+                  />
                 ) : (
-                  <span className="flex shrink-0 flex-wrap justify-end gap-1">
-                    {SAVE_AS.filter(
-                      (option) => item.kind === "image" || option.kind !== "profile_photo",
-                    ).map((option) => (
-                      <button
-                        key={option.kind}
-                        onClick={() => void saveFromChat(item, option.kind)}
-                        disabled={busy !== null}
-                        title={option.title}
-                        className="rounded border border-gray-300 px-2 py-0.5 text-xs disabled:opacity-50"
-                      >
-                        {option.label}
-                      </button>
-                    ))}
+                  <span className="flex h-12 w-12 items-center justify-center overflow-hidden rounded border border-gray-200 bg-gray-50 px-0.5 text-center text-[9px] leading-tight text-gray-600">
+                    {item.filename ?? KIND_LABELS[item.kind]}
+                  </span>
+                )}
+                {savedIds.has(item.wa_message_id) && (
+                  <span className="absolute -right-1 -top-1 rounded-full bg-emerald-600 px-1 text-[9px] text-white">
+                    ✓
                   </span>
                 )}
               </li>
             ))}
           </ul>
         )}
-        <p className="mt-1 flex flex-wrap gap-x-3 text-xs text-gray-500">
-          Or upload: {uploadLink("original_cv", "a CV")}
-          {uploadLink("other", "a certificate / other")}
-          {uploadLink("profile_photo", "their photo")}
+        <p className="mt-1 text-xs text-gray-500">
+          {unsaved.length > 0
+            ? `Writing the CV saves ${unsaved.length === 1 ? "it" : `all ${unsaved.length}`}; a photo of them goes on the CV. `
+            : media.length > 0
+              ? "All saved; a photo of them goes on the CV. "
+              : ""}
+          <label className="cursor-pointer text-brand underline">
+            {busy === "upload" ? "Uploading…" : "Add a file"}
+            <input
+              type="file"
+              accept={CV_FILE_TYPES.join(",")}
+              className="hidden"
+              disabled={busy !== null}
+              onChange={(event) => {
+                uploadChosen(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+          </label>
         </p>
       </div>
 
-      {/* The CV in CV Studio */}
+      {/* The CV, in CV Builder or CV Studio */}
       <div className="mt-3 border-t border-gray-100 pt-2">
         <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">CV</p>
-        {(cvCount > 0 || otherCount > 0 || hasPhoto) && (
-          <p className="mt-1 text-xs text-gray-500">
-            Saved:{" "}
-            {[
-              cvCount > 0 && plural(cvCount, "CV file"),
-              otherCount > 0 && plural(otherCount, "other document"),
-              hasPhoto && "their photo",
-            ]
-              .filter(Boolean)
-              .join(", ")}
-            . They&apos;re all read, with your chat.
-          </p>
-        )}
-        {cvJob && isActive(cvJob) ? (
+        {writing ? (
           <p className="mt-1 text-xs text-gray-600">
             {waitMinutes > 0
               ? `Starts writing in about ${plural(waitMinutes, "minute")}, so their other files can be saved first.`
@@ -352,42 +346,47 @@ export function CvPanel({ enabled, dashboardUrl }: { enabled: boolean; dashboard
               ? engine === "cv_builder"
                 ? "It's in CV Builder (Executive Teal)."
                 : `Version ${pipeline.cv_version} is in CV Studio.`
-              : cvCount + otherCount > 0
-                ? "Ready to write."
-                : "Save their CV, or write it from what they typed in the chat."}
+              : "One click saves their files, reads your chat and writes the CV."}
           </p>
         )}
-        {Boolean(pipeline?.cv_version) && changes && !(cvJob && isActive(cvJob)) && (
+        {Boolean(pipeline?.cv_version) && changes && !writing && (
           <p className="mt-1 text-xs text-gray-600">{changesText(changes)}</p>
         )}
         <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {!pipeline?.cv_version && (!(cvJob && isActive(cvJob)) || waitMinutes > 0) && (
+          {!pipeline?.cv_version && !writing && pipeline && (
+            <>
+              {(["cv_builder", "cv_studio"] as const).map((choice) => (
+                <button
+                  key={choice}
+                  onClick={() => void writeCv(choice)}
+                  disabled={busy !== null}
+                  className={
+                    choice === "cv_builder"
+                      ? "rounded-md bg-brand px-2 py-1 text-xs text-white disabled:opacity-50"
+                      : "rounded-md border border-gray-300 px-2 py-1 text-xs disabled:opacity-50"
+                  }
+                >
+                  {busy === `write-${choice}`
+                    ? "Saving and writing…"
+                    : `Write in ${ENGINE_NAMES[choice]}`}
+                </button>
+              ))}
+            </>
+          )}
+          {waitMinutes > 0 && (
             <button
-              onClick={() =>
-                void run("start", async () => {
-                  await readChat();
-                  await callBackground({ type: "start-cv", orderId });
-                  return `Writing the CV in ${ENGINE_NAMES[engine]} from their files and your chat.`;
-                })
-              }
+              onClick={() => void writeCv(engine)}
               disabled={busy !== null}
               className="rounded-md bg-brand px-2 py-1 text-xs text-white disabled:opacity-50"
             >
-              {waitMinutes > 0 ? "Start now" : "Write the CV"}
+              Start now
             </button>
           )}
-          {Boolean(pipeline?.cv_version) && changes && !(cvJob && isActive(cvJob)) && (
+          {Boolean(pipeline?.cv_version) && changes && !writing && (
             <button
-              onClick={() =>
-                void run("update", async () => {
-                  // Messages the panel hasn't seen yet may be on screen
-                  await readChat();
-                  await callBackground({ type: "update-cv", orderId });
-                  return "Updating the CV with what they sent.";
-                })
-              }
+              onClick={() => void updateCv()}
               disabled={busy !== null}
-              title="Applies their new messages and files to the CV"
+              title="Saves their new files, then applies their new messages and files to the CV"
               className="rounded-md bg-brand px-2 py-1 text-xs text-white disabled:opacity-50"
             >
               {busy === "update" ? "Starting…" : "Update CV from chat"}
@@ -404,8 +403,8 @@ export function CvPanel({ enabled, dashboardUrl }: { enabled: boolean; dashboard
             </a>
           )}
         </div>
-        {/* Where it's written: CV Builder by default */}
-        {pipeline && (
+        {/* Once written: switch to write it again in the other one */}
+        {Boolean(pipeline?.cv_version) && (
           <div className="mt-2 flex items-center gap-1.5 text-xs text-gray-500">
             <span>Written in</span>
             <span className="inline-flex rounded border border-gray-300 p-0.5">
