@@ -289,7 +289,11 @@ export function readChatMessages(root: ParentNode = document): ChatMessageInput[
           wa_message_id: id,
           direction: outgoing ? "out" : "in",
           text,
-          media_type: queryInside("messageImage", element) ? "image" : "none",
+          media_type: queryInside("messageDocument", element)
+            ? "document"
+            : queryInside("messageImage", element)
+              ? "image"
+              : "none",
           sent_at: parseMessageTime(
             queryInside("messageMeta", element)?.getAttribute("data-pre-plain-text") ?? null,
           ),

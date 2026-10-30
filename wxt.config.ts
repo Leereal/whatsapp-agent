@@ -22,8 +22,9 @@ export default defineConfig({
       name: mode === "production" ? "CareerCVPro WhatsApp Assistant" : "CareerCVPro WhatsApp (dev)",
       description: "Pricing replies, reply drafts and order tracking for WhatsApp Web.",
       key: EXTENSION_KEY,
-      // Later phases add downloads (CV capture) and notifications (payment proof)
-      permissions: ["storage", "sidePanel", "alarms"],
+      // downloads: to read a client's document when WhatsApp saves it (CV capture).
+      // Phase 5 adds notifications (payment proof).
+      permissions: ["storage", "sidePanel", "alarms", "downloads"],
       host_permissions: ["https://web.whatsapp.com/*", `${apiOrigin}/*`],
       action: { default_title: "Open the WhatsApp assistant" },
     };

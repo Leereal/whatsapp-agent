@@ -23,7 +23,10 @@ const REASONS: Record<string, string> = {
   opted_out: "They opted out",
   already_answered: "The chat was already answered",
   chat_moved_on: "They wrote again, so a newer reply replaces it",
-  superseded: "Replaced by a reply to their newer message",
+  superseded: "Replaced by a newer one",
+  could_not_paste: "Couldn't put it in the chat",
+  not_sent: "It wasn't sent within 5 minutes",
+  sent_by_hand: "Send it from the client's chat",
 };
 
 export const STAGES: Record<string, string> = {
@@ -110,6 +113,17 @@ const EVENTS: Record<string, string> = {
   install_created: "Token created",
   install_rotated: "Token rotated",
   install_revoked: "Token revoked",
+  file_saved: "File saved",
+  cv_draft_ready: "CV written",
+  preview_ready: "Preview ready",
+  preview_sent: "Preview sent",
+  job_failed: "CV work failed",
+};
+
+/** Background work on an order */
+export const JOBS: Record<string, string> = {
+  cv_draft: "Writing the CV",
+  preview: "Making the preview",
 };
 
 export function eventText(type: string): string {

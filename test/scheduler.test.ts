@@ -16,6 +16,7 @@ const item = (id: string, notBeforeOffsetMs: number, title = id): OutboxItem => 
   contact: { id: `c-${id}`, title, phone: null, is_test: false },
   text: null,
   draft: null,
+  file_id: null,
 });
 
 const sent: SendOutcome = { kind: "done", status: "sent" };
@@ -98,6 +99,17 @@ describe("SendScheduler", () => {
     expect(scheduler.size).toBe(1);
 
     scheduler.upsert({ ...item("c", 0), status: "cancelled" });
+    expect(scheduler.size).toBe(0);
+  });
+
+  it("never takes a preview: those are pasted from the side panel and I press send", () => {
+    const scheduler = new SendScheduler(
+      vi.fn(async () => sent),
+      undefined,
+      now,
+    );
+    scheduler.upsert({ ...item("p", 0), kind: "preview", file_id: "f1" });
+    scheduler.sync([{ ...item("q", 0), kind: "preview", status: "claimed", file_id: "f2" }]);
     expect(scheduler.size).toBe(0);
   });
 });

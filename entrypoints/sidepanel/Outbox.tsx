@@ -3,6 +3,7 @@ import { callBackground } from "../../src/bridge";
 import { usePolling } from "../../src/ui/usePolling";
 import type { OutboxItem } from "../../src/shared/contract";
 import { ago, INTENTS, reasonText } from "../../src/ui/labels";
+import { TEXT_KINDS } from "../../src/scheduler";
 
 const KIND: Record<string, string> = {
   pricing: "Pricing",
@@ -82,9 +83,13 @@ export function Outbox({ enabled }: { enabled: boolean }) {
     (item) => item.status === "needs_approval" || item.status === "failed",
   );
   // "Send all" is for missed pricing; each reply is read and approved on its own
-  const sendable = waiting.filter((item) => item.status === "needs_approval" && item.kind !== "reply");
+  const sendable = waiting.filter(
+    (item) => item.status === "needs_approval" && item.kind !== "reply" && TEXT_KINDS.includes(item.kind),
+  );
+  // Previews go out from their chat's "CV & preview" section, not from here
   const scheduled = items.filter(
-    (item) => item.status === "scheduled" || item.status === "claimed",
+    (item) =>
+      TEXT_KINDS.includes(item.kind) && (item.status === "scheduled" || item.status === "claimed"),
   );
 
   return (
@@ -129,15 +134,20 @@ export function Outbox({ enabled }: { enabled: boolean }) {
                 {item.status === "failed" && (
                   <p className="text-xs text-red-600">{reasonText(item.failure_reason)}</p>
                 )}
+                {!TEXT_KINDS.includes(item.kind) && (
+                  <p className="text-xs text-gray-500">Open this chat to send it.</p>
+                )}
               </div>
               <div className="flex shrink-0 gap-1">
-                <button
-                  onClick={() => void act(item.id, "outbox-approve")}
-                  disabled={busy !== null}
-                  className="rounded bg-brand px-2 py-1 text-xs text-white disabled:opacity-50"
-                >
-                  {item.status === "failed" ? "Retry" : "Send"}
-                </button>
+                {TEXT_KINDS.includes(item.kind) && (
+                  <button
+                    onClick={() => void act(item.id, "outbox-approve")}
+                    disabled={busy !== null}
+                    className="rounded bg-brand px-2 py-1 text-xs text-white disabled:opacity-50"
+                  >
+                    {item.status === "failed" ? "Retry" : "Send"}
+                  </button>
+                )}
                 <button
                   onClick={() => void act(item.id, "outbox-cancel")}
                   disabled={busy !== null}

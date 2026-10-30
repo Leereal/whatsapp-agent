@@ -1,5 +1,13 @@
-import type { OutboxItem } from "./shared/contract";
+import type { OutboxItem, OutboxKind } from "./shared/contract";
 import type { SendOutcome } from "./sender";
+
+/** Messages the extension types and sends; previews are pasted and I press send */
+export const TEXT_KINDS: readonly OutboxKind[] = [
+  "pricing",
+  "reply",
+  "request_cv",
+  "payment_details",
+];
 
 /**
  * Holds the scheduled messages and runs them one at a time when due.
@@ -16,9 +24,12 @@ export class SendScheduler {
     private readonly now: () => number = Date.now,
   ) {}
 
-  /** Add or refresh an item; only scheduled (or abandoned claimed) items run */
+  /** Add or refresh an item; only scheduled (or abandoned claimed) text messages run */
   upsert(item: OutboxItem): void {
-    if (item.status !== "scheduled" && item.status !== "claimed") {
+    if (
+      !TEXT_KINDS.includes(item.kind) ||
+      (item.status !== "scheduled" && item.status !== "claimed")
+    ) {
       this.due.delete(item.id);
       return;
     }

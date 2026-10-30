@@ -24,13 +24,17 @@ export type SelectorKey =
   | "messageMeta"
   | "messageText"
   | "messageImage"
+  | "messageDocument"
   | "messageSender"
   | "messageStatus"
   | "messageTailOut"
   | "messageTailIn"
   | "systemMessage"
   | "composer"
-  | "sendButton";
+  | "sendButton"
+  | "attachButton"
+  | "attachImageInput"
+  | "mediaCaption";
 
 export interface SelectorDef {
   description: string;
@@ -147,6 +151,18 @@ export const SELECTORS: Readonly<Record<SelectorKey, SelectorDef>> = {
     within: "conversationPanel",
     optional: true,
   },
+  messageDocument: {
+    description: 'A document in a message: its download control (titled Download "CV.pdf")',
+    candidates: [
+      '[role="button"][title^="Download"]',
+      '[title^="Download"]',
+      '[data-icon="audio-download"]',
+      '[data-icon^="document-"]',
+    ],
+    scope: "chat",
+    within: "conversationPanel",
+    optional: true,
+  },
   // Who sent a message. Read per message (queryInside); any one may be missing
   // on a given message, so none of these is required by the health check.
   messageSender: {
@@ -216,6 +232,36 @@ export const SELECTORS: Readonly<Record<SelectorKey, SelectorDef>> = {
     ],
     scope: "action",
     within: "conversationPanel",
+  },
+  // Putting a file (a preview) into the chat. Only checked while doing it.
+  attachButton: {
+    description: "The attach (+) button next to the message box",
+    candidates: [
+      'button[aria-label="Attach"]',
+      '[aria-label="Attach"]',
+      '[title="Attach"]',
+      'span[data-icon="plus-rounded"]',
+      'span[data-icon="plus"]',
+    ],
+    scope: "action",
+    within: "conversationPanel",
+  },
+  attachImageInput: {
+    description: "The hidden file input for photos in the attach menu",
+    candidates: [
+      'input[type="file"][accept*="image"]',
+      'input[type="file"]',
+    ],
+    scope: "action",
+  },
+  mediaCaption: {
+    description: "The caption box in the photo editor that opens before a photo is sent",
+    candidates: [
+      'div[contenteditable="true"][aria-placeholder*="caption" i]',
+      'div[contenteditable="true"][aria-label*="caption" i]',
+      '[data-testid="media-caption-input-container"] [contenteditable="true"]',
+    ],
+    scope: "action",
   },
 };
 

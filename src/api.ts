@@ -1,3 +1,4 @@
+import { base64ToBytes, type FilePayload } from "./bytes";
 import { API_BASE_URL } from "./config";
 import { installToken } from "./storage";
 import type {
@@ -17,11 +18,16 @@ import type {
   HeartbeatRequest,
   HeartbeatResponse,
   ManualReplyRequest,
+  OrderPipeline,
   OutboxItem,
   OutboxResultRequest,
   OutboxStatus,
   ScanRequest,
   ScanResponse,
+  TakeOutboxResponse,
+  UploadFileKind,
+  UploadFileResponse,
+  WhatsAppJob,
 } from "./shared/contract";
 
 /**
@@ -44,7 +50,8 @@ export class ApiError extends Error {
 
 const GATEWAY_ERRORS = [502, 503, 504];
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** Send a request; the response is checked for auth, gateway and server errors */
+async function send(path: string, init: RequestInit): Promise<Response> {
   const token = await installToken.getValue();
   if (!token) throw new ApiError("Add your extension token in the options page", "no_token");
 
@@ -54,7 +61,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       ...init,
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+        // A multipart upload sets its own type, with the boundary
+        ...(init.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
         ...init.headers,
       },
     });
@@ -65,7 +73,26 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (GATEWAY_ERRORS.includes(response.status)) {
     throw new ApiError("Cannot reach CareerCVPro", "offline", response.status);
   }
+  return response;
+}
 
+/** A file the API serves as bytes, with its type */
+async function requestBytes(path: string): Promise<{ bytes: ArrayBuffer; mime: string }> {
+  const response = await send(path, {});
+  if (response.ok) {
+    return {
+      bytes: await response.arrayBuffer(),
+      mime: response.headers.get("Content-Type") ?? "application/octet-stream",
+    };
+  }
+  return readJson(response);
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return readJson<T>(await send(path, init));
+}
+
+async function readJson<T>(response: Response): Promise<T> {
   const body = (await response.json().catch(() => null)) as {
     success?: boolean;
     data?: T;
@@ -149,4 +176,42 @@ export const api = {
     request<CurrentChat>(`/contacts/${encodeURIComponent(contactId)}/close-handoff`, {
       method: "POST",
     }),
+
+  getPipeline: (orderId: string) =>
+    request<OrderPipeline>(`/orders/${encodeURIComponent(orderId)}/pipeline`),
+
+  uploadFile: (
+    orderId: string,
+    input: { kind: UploadFileKind; waMessageId: string | null; file: FilePayload },
+  ) => {
+    const form = new FormData();
+    form.append("kind", input.kind);
+    if (input.waMessageId) form.append("wa_message_id", input.waMessageId);
+    form.append(
+      "file",
+      new Blob([base64ToBytes(input.file.base64)], { type: input.file.mime }),
+      input.file.filename,
+    );
+    return request<UploadFileResponse>(`/orders/${encodeURIComponent(orderId)}/files`, {
+      method: "POST",
+      body: form,
+    });
+  },
+
+  startCv: (orderId: string, fileId?: string) =>
+    request<WhatsAppJob>(`/orders/${encodeURIComponent(orderId)}/start-cv`, {
+      method: "POST",
+      body: JSON.stringify(fileId ? { file_id: fileId } : {}),
+    }),
+
+  createPreview: (orderId: string) =>
+    request<WhatsAppJob>(`/orders/${encodeURIComponent(orderId)}/preview`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  fileContent: (fileId: string) => requestBytes(`/files/${encodeURIComponent(fileId)}/content`),
+
+  takeOutbox: (id: string) =>
+    request<TakeOutboxResponse>(`/outbox/${encodeURIComponent(id)}/take`, { method: "POST" }),
 };

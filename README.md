@@ -5,7 +5,7 @@ CareerCVPro API (`careercvpro/backend`, `/api/v1/whatsapp/ext`) with a
 per-install token; it holds no API keys. Design and phases:
 `careercvpro/backend/plan.md` and `careercvpro/backend/CLAUDE.md`.
 
-Current phase: **3 (selective auto-send)**.
+Current phase: **4 (CV pipeline)**.
 
 - **Pricing (phase 1).** The extension checks that WhatsApp Web still matches
   `src/selectors.ts`, reports labelled chats and new leads (unsaved numbers
@@ -32,17 +32,29 @@ Current phase: **3 (selective auto-send)**.
   disputes and change requests always wait for you. Before sending, the
   extension checks that the client's message the reply answers is still the
   chat's last one, so a reply never lands after the conversation moved on.
+- **CV and preview (phase 4).** The side panel's **CV & preview** card follows
+  the open client chat. **Save as CV** on a photo or document the client sent
+  stores it in CareerCVPro (photos are read from the page; for a document the
+  extension clicks WhatsApp's download and reads the file it saves, which is
+  why it needs the `downloads` permission). **Or upload a file** works when
+  that fails. CareerCVPro then writes the CV in CV Studio (by itself when CV
+  autostart is on, otherwise **Write the CV**); refine it there. **Make
+  preview** renders the CV's first page with the watermark; **Put preview in
+  chat** pastes it with its caption into the open chat. **You press send**;
+  the extension sees the photo go out and records it (stage "Preview sent").
 
-| Path               | What                                                     |
-| ------------------ | -------------------------------------------------------- |
-| `src/agent.ts`     | Runs in WhatsApp Web: scanning, scheduling, manual-reply |
-| `src/scanner.ts`   | Reports changed chat-list rows to the backend            |
-| `src/scheduler.ts` | Runs due sends one at a time                             |
-| `src/reader.ts`    | Reads client chats for automatic replies, one at a time  |
-| `src/pageLock.ts`  | Keeps sending and reading from using the page at once    |
-| `src/sender.ts`    | One send, step by step; any doubt stops it               |
-| `src/copilot.ts`   | The open chat: sync, read for a draft, insert or send it |
-| `src/dom/chat.ts`  | Open a chat, read messages, type, send, confirm          |
+| Path                 | What                                                             |
+| -------------------- | ---------------------------------------------------------------- |
+| `src/agent.ts`       | Runs in WhatsApp Web: scanning, scheduling, manual-reply         |
+| `src/scanner.ts`     | Reports changed chat-list rows to the backend                    |
+| `src/scheduler.ts`   | Runs due sends one at a time                                     |
+| `src/reader.ts`      | Reads client chats for automatic replies, one at a time          |
+| `src/pageLock.ts`    | Keeps sending and reading from using the page at once            |
+| `src/sender.ts`      | One send, step by step; any doubt stops it                       |
+| `src/copilot.ts`     | The open chat: sync, read for a draft, insert or send it         |
+| `src/dom/chat.ts`    | Open a chat, read messages, type, send, confirm                  |
+| `src/dom/media.ts`   | The client's photos and documents; paste a preview               |
+| `src/fileActions.ts` | Save a client's file; put a preview in the chat, record the send |
 
 ## Setup
 

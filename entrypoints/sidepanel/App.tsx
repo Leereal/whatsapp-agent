@@ -11,6 +11,7 @@ import type { ConnectionStatus, HealthState } from "../../src/types";
 import { useStorageItem } from "../../src/ui/useStorageItem";
 import { Activity } from "./Activity";
 import { askWhatsAppTab, TAB_PROBLEMS, WHATSAPP_URL } from "../../src/ui/whatsappTab";
+import { CvPanel } from "./CvPanel";
 import { Draft } from "./Draft";
 import { Outbox } from "./Outbox";
 
@@ -224,6 +225,7 @@ export function App() {
       </section>
 
       <Draft enabled={connected} />
+      <CvPanel enabled={connected} dashboardUrl={dashboardUrl} />
       <Outbox enabled={Boolean(connected && config?.enabled)} />
       <Activity enabled={Boolean(connected)} />
 

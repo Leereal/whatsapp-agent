@@ -94,6 +94,11 @@ export const EVENT_TYPES = [
   "reply_scheduled",
   "reply_queued",
   "reply_sent",
+  "file_saved",
+  "cv_draft_ready",
+  "preview_ready",
+  "preview_sent",
+  "job_failed",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
@@ -161,6 +166,41 @@ export type TemplateKind = (typeof TEMPLATE_ACTIONS)[keyof typeof TEMPLATE_ACTIO
 
 export const DRAFT_OUTCOMES = ["inserted", "sent", "edited", "discarded"] as const;
 export type DraftOutcome = (typeof DRAFT_OUTCOMES)[number];
+
+/** What a stored client file is */
+export const FILE_KINDS = ["original_cv", "pop", "preview", "final_pdf", "other"] as const;
+export type FileKind = (typeof FILE_KINDS)[number];
+
+/** Kinds the extension or I may upload; previews and final PDFs are made by CareerCVPro */
+export const UPLOAD_FILE_KINDS = ["original_cv", "pop", "other"] as const;
+export type UploadFileKind = (typeof UPLOAD_FILE_KINDS)[number];
+
+/** File types a client's CV can arrive as (the ones CV Studio reads) */
+export const CV_FILE_TYPES = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+] as const;
+
+/** Largest file that can be saved (the same limit as CV Studio uploads) */
+export const MAX_FILE_BYTES = 15 * 1024 * 1024;
+
+export const JOB_TYPES = [
+  "cv_draft",
+  "preview",
+  "final_pdf",
+  "retention_sweep",
+  "erase_contact",
+  "embed_examples",
+] as const;
+export type JobType = (typeof JOB_TYPES)[number];
+
+export const JOB_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
+export type JobStatus = (typeof JOB_STATUSES)[number];
 
 export const REPLY_EXAMPLE_SOURCES = ["import", "approved_draft", "manual"] as const;
 export type ReplyExampleSource = (typeof REPLY_EXAMPLE_SOURCES)[number];
@@ -323,9 +363,20 @@ export interface OutboxItem {
   text: string | null;
   /** For a reply the assistant wrote: what it read and how sure it was */
   draft: { intent: DraftIntent; confidence: number | null } | null;
+  /** For a preview (or final PDF): the file it sends */
+  file_id: string | null;
 }
 
 /** POST /ext/outbox/:id/claim, called right before sending */
+/**
+ * POST /ext/outbox/:id/take: I'm sending this preview myself. The extension
+ * pastes the file with its caption into the open chat and I press send.
+ */
+export interface TakeOutboxResponse {
+  caption: string;
+  file: { id: string; mime_type: string; filename: string };
+}
+
 export interface ClaimResponse {
   go: boolean;
   reason?: string;
@@ -453,6 +504,78 @@ export interface ApplyDraftActionRequest {
 }
 
 // ------------------------------------------------------------------
+// CV pipeline: the client's files, CV Studio and the preview
+// ------------------------------------------------------------------
+
+export interface WhatsAppFile {
+  id: string;
+  kind: FileKind;
+  mime_type: string;
+  size_bytes: number;
+  original_filename: string | null;
+  /** The WhatsApp message it came from */
+  source_wa_message_id: string | null;
+  /** The CV Studio version a preview shows */
+  cv_version: number | null;
+  created_at: string;
+}
+
+export interface WhatsAppJob {
+  id: string;
+  type: JobType;
+  status: JobStatus;
+  attempts: number;
+  max_attempts: number;
+  /** Why the last attempt failed, in a few words */
+  last_error: string | null;
+  run_after: string;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+/** An order's CV work, for the side panel and the order page */
+export interface OrderPipeline {
+  order_id: string;
+  stage: OrderStage;
+  cv_studio_session_id: string | null;
+  /** The CV's latest version in CV Studio; 0 before anything is written */
+  cv_version: number;
+  /** Newest first */
+  files: WhatsAppFile[];
+  /** Newest first */
+  jobs: WhatsAppJob[];
+  /** The preview waiting for me to send it */
+  preview: OutboxItem | null;
+}
+
+/** POST /ext/orders/:id/files and /admin/orders/:id/files (multipart: file, kind, wa_message_id?) */
+export interface UploadFileResponse {
+  file: WhatsAppFile;
+  /** The same file was already saved for this order */
+  duplicate: boolean;
+  /** The CV draft, when it started by itself (CV autostart is on) */
+  job: WhatsAppJob | null;
+}
+
+/** POST /ext/orders/:id/start-cv and /admin/orders/:id/start-cv */
+export interface StartCvRequest {
+  /** The client's CV to write from; the latest one when left out */
+  file_id?: string;
+}
+
+/** POST /ext/orders/:id/preview and /admin/orders/:id/preview */
+export interface CreatePreviewRequest {
+  /** The CV Studio version to show; the latest when left out */
+  version?: number;
+}
+
+/** POST /admin/orders/:id/cv-studio: link a CV I started in CV Studio myself */
+export interface LinkCvStudioRequest {
+  session_id: string;
+}
+
+// ------------------------------------------------------------------
 // Orders (dashboard board)
 // ------------------------------------------------------------------
 
@@ -508,12 +631,16 @@ export interface WhatsAppDraft {
   created_at: string;
 }
 
+/** A file with a link to open it, valid for 5 minutes */
+export type WhatsAppFileWithUrl = WhatsAppFile & { url: string | null };
+
 /** GET /admin/orders/:id */
 export interface WhatsAppOrderDetail {
   order: WhatsAppOrder & {
     target_role: string | null;
     notes: string | null;
     pop_received_at: string | null;
+    cv_studio_session_id: string | null;
   };
   contact: {
     id: string;
@@ -533,6 +660,7 @@ export interface WhatsAppOrderDetail {
   /** Newest first */
   drafts: WhatsAppDraft[];
   events: WhatsAppEvent[];
+  pipeline: Omit<OrderPipeline, "files"> & { files: WhatsAppFileWithUrl[] };
 }
 
 // ------------------------------------------------------------------

@@ -1,9 +1,10 @@
 import { browser } from "wxt/browser";
 import { defineBackground } from "wxt/utils/define-background";
 import { api, ApiError } from "../src/api";
+import { bytesToBase64, mimeFor, type FilePayload } from "../src/bytes";
 import { HEALTH_RESEND_MS, HEALTH_STALE_MS } from "../src/config";
 import { healthKey } from "../src/dom/healthCheck";
-import type { ApiReply, ExtensionMessage } from "../src/messages";
+import type { ApiReply, ExtensionMessage, SavedDownload } from "../src/messages";
 import {
   initSentry,
   reportError,
@@ -29,6 +30,9 @@ import { isOlderThan } from "../src/version";
  */
 
 const HEARTBEAT_ALARM = "heartbeat";
+/** How long to wait for WhatsApp to start saving a document after it was clicked */
+const DOWNLOAD_WAIT_MS = 20_000;
+const WHATSAPP_BLOB = "blob:https://web.whatsapp.com/";
 const TOKEN_PATTERN = new RegExp(`^${INSTALL_TOKEN_PREFIX}[A-Za-z0-9_-]{43}$`);
 
 const extensionVersion = () => browser.runtime.getManifest().version;
@@ -145,6 +149,54 @@ async function clearToken(): Promise<ConnectionStatus> {
   return refreshConnection();
 }
 
+/**
+ * Saving a client's document: the WhatsApp tab clicks its download control
+ * and asks to be told about the download WhatsApp starts. Its blob: URL
+ * belongs to the WhatsApp page, which reads the file from it.
+ */
+let downloadWaiter: ((download: SavedDownload | null) => void) | null = null;
+/** WhatsApp's latest downloads, in case one started before the tab asked about it */
+const recentDownloads: Array<SavedDownload & { at: number }> = [];
+
+/** The first WhatsApp download started at or after `since`, waiting for one if needed */
+function expectDownload(since: number): Promise<ApiReply<SavedDownload | null>> {
+  const earlier = recentDownloads.find((download) => download.at >= since);
+  if (earlier) {
+    const { download_id, url, filename } = earlier;
+    return Promise.resolve({ ok: true, data: { download_id, url, filename } });
+  }
+  downloadWaiter?.(null);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => finish(null), DOWNLOAD_WAIT_MS);
+    const finish = (download: SavedDownload | null) => {
+      clearTimeout(timer);
+      if (downloadWaiter === finish) downloadWaiter = null;
+      resolve({ ok: true, data: download });
+    };
+    downloadWaiter = finish;
+  });
+}
+
+function onDownloadCreated(item: { id: number; url: string; finalUrl?: string; filename?: string }) {
+  const url = item.finalUrl || item.url;
+  if (!url.startsWith(WHATSAPP_BLOB)) return;
+  const download: SavedDownload = {
+    download_id: item.id,
+    url,
+    filename: item.filename?.split(/[\\/]/).pop() || null,
+  };
+  recentDownloads.unshift({ ...download, at: Date.now() });
+  recentDownloads.splice(5);
+  downloadWaiter?.(download);
+}
+
+/** The file was read from the page: stop the download if it's still going and drop it from the list */
+async function forgetDownload(downloadId: number): Promise<ApiReply<null>> {
+  await browser.downloads.cancel(downloadId).catch(() => undefined);
+  await browser.downloads.erase({ id: downloadId }).catch(() => undefined);
+  return { ok: true, data: null };
+}
+
 /** Run an API call for a content script or page, as an ApiReply */
 async function proxy<T>(call: () => Promise<T>): Promise<ApiReply<T>> {
   try {
@@ -206,6 +258,35 @@ function handleMessage(message: ExtensionMessage): Promise<unknown> | null {
       return proxy(() => api.applyDraftAction(message.id, message.actionIndex));
     case "handoff-close":
       return proxy(() => api.closeHandoff(message.contactId));
+    case "pipeline-get":
+      return proxy(() => api.getPipeline(message.orderId));
+    case "file-upload":
+      return proxy(() =>
+        api.uploadFile(message.orderId, {
+          kind: message.kind,
+          waMessageId: message.waMessageId,
+          file: message.file,
+        }),
+      );
+    case "start-cv":
+      return proxy(() => api.startCv(message.orderId, message.fileId));
+    case "create-preview":
+      return proxy(() => api.createPreview(message.orderId));
+    case "file-content":
+      return proxy(async (): Promise<FilePayload> => {
+        const { bytes, mime } = await api.fileContent(message.fileId);
+        return {
+          base64: bytesToBase64(bytes),
+          mime: mimeFor(message.filename, mime),
+          filename: message.filename,
+        };
+      });
+    case "outbox-take":
+      return proxy(() => api.takeOutbox(message.id));
+    case "expect-download":
+      return expectDownload(message.since);
+    case "forget-download":
+      return forgetDownload(message.downloadId);
     default:
       return null;
   }
@@ -227,6 +308,7 @@ export default defineBackground(() => {
     if (alarm.name === HEARTBEAT_ALARM) void refreshConnection();
   });
   browser.runtime.onInstalled.addListener(() => void refreshConnection());
+  browser.downloads.onCreated.addListener(onDownloadCreated);
   browser.runtime.onStartup.addListener(() => void refreshConnection());
 
   browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
