@@ -202,9 +202,9 @@ export const CV_FILE_TYPES = [
 export const MAX_FILE_BYTES = 15 * 1024 * 1024;
 
 /**
- * Where a client's CV is written: CV Builder (the default; Executive Teal,
- * edited in the builder's form) or CV Studio (written as one document).
- * Needs migration 04c.
+ * Where a client's CV is written: CV Studio (the default since migration
+ * 04d; written as one document in the house designs) or CV Builder
+ * (Executive Teal, edited in the builder's form). Needs migration 04c.
  */
 export const CV_ENGINES = ["cv_builder", "cv_studio"] as const;
 export type CvEngine = (typeof CV_ENGINES)[number];
